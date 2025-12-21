@@ -3,7 +3,7 @@
 //! Tests PNG encoding against expected output and validates
 //! that encoded images can be decoded correctly.
 
-use comprs::{png, ColorType};
+use comprs::{png, ColorType, Error};
 use image::GenericImageView;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use proptest::prelude::*;
@@ -395,4 +395,27 @@ fn test_large_image() {
     // IHDR should have correct dimensions
     assert_eq!(&result[16..20], &[0, 0, 0x03, 0xE8]); // 1000 in big-endian
     assert_eq!(&result[20..24], &[0, 0, 0x03, 0xE8]);
+}
+
+/// Encoding should be deterministic for identical inputs.
+#[test]
+fn test_png_deterministic() {
+    let mut rng = StdRng::seed_from_u64(2024);
+    let w = 16;
+    let h = 8;
+    let mut pixels = vec![0u8; (w * h * 3) as usize];
+    rng.fill(pixels.as_mut_slice());
+
+    let a = png::encode(&pixels, w, h, ColorType::Rgb).unwrap();
+    let b = png::encode(&pixels, w, h, ColorType::Rgb).unwrap();
+    assert_eq!(a, b);
+}
+
+/// Reject images exceeding maximum dimension without requiring huge allocations.
+#[test]
+fn test_png_rejects_image_too_large() {
+    let width = (1 << 24) + 1; // just over MAX_DIMENSION
+    let height = 1;
+    let err = png::encode(&[], width, height, ColorType::Rgb).unwrap_err();
+    assert!(matches!(err, Error::ImageTooLarge { .. }));
 }
