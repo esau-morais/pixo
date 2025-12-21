@@ -101,9 +101,15 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
     let mut lz77 = Lz77Compressor::new(level);
     let tokens = lz77.compress(data);
 
-    // For simplicity, we'll use fixed Huffman codes
-    // Dynamic codes would give better compression but are more complex
-    encode_fixed_huffman(&tokens)
+    // Choose between fixed and dynamic Huffman based on output size.
+    let fixed = encode_fixed_huffman(&tokens);
+    let dynamic = encode_dynamic_huffman(&tokens);
+
+    if dynamic.len() < fixed.len() {
+        dynamic
+    } else {
+        fixed
+    }
 }
 
 /// Compress data and wrap it in a zlib container (RFC 1950).
@@ -193,6 +199,187 @@ fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
     writer.write_bits(reverse_bits(eob_code.code, eob_code.length), eob_code.length);
 
     writer.finish()
+}
+
+/// Encode tokens using dynamic Huffman codes (RFC 1951).
+fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
+    // Frequencies
+    let mut lit_freqs = vec![0u32; 286]; // 0-285
+    let mut dist_freqs = vec![0u32; 30]; // 0-29
+
+    for token in tokens {
+        match *token {
+            Token::Literal(b) => lit_freqs[b as usize] += 1,
+            Token::Match { length, distance } => {
+                let (len_symbol, _, _) = length_code(length);
+                lit_freqs[len_symbol as usize] += 1;
+
+                let (dist_symbol, _, _) = distance_code(distance);
+                dist_freqs[dist_symbol as usize] += 1;
+            }
+        }
+    }
+    // End-of-block
+    lit_freqs[256] += 1;
+
+    // Ensure at least one distance code per spec
+    if dist_freqs.iter().all(|&f| f == 0) {
+        dist_freqs[0] = 1;
+    }
+
+    let lit_codes = huffman::build_codes(&lit_freqs, huffman::MAX_CODE_LENGTH);
+    let dist_codes = huffman::build_codes(&dist_freqs, huffman::MAX_CODE_LENGTH);
+
+    // Code lengths
+    let mut lit_lengths: Vec<u8> = lit_codes.iter().map(|c| c.length).collect();
+    let mut dist_lengths: Vec<u8> = dist_codes.iter().map(|c| c.length).collect();
+
+    // Trim trailing zeros for HLIT/HDIST
+    let hlit = (last_nonzero(&lit_lengths).saturating_sub(257)).min(29);
+    let hdist = (last_nonzero(&dist_lengths).saturating_sub(1)).min(29);
+
+    lit_lengths.truncate(257 + hlit as usize);
+    dist_lengths.truncate(1 + hdist as usize);
+
+    // RLE encode code lengths
+    let mut cl_freqs = vec![0u32; 19];
+    let rle = rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+
+    // Build code length codes (max len 7)
+    let cl_codes = huffman::build_codes(&cl_freqs, 7);
+
+    // Determine HCLEN (last non-zero in order)
+    let cl_order: [usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+    let mut hclen = 0;
+    for (i, &idx) in cl_order.iter().enumerate().rev() {
+        if cl_codes[idx].length > 0 {
+            hclen = i as u8;
+            break;
+        }
+    }
+
+    let mut writer = BitWriter::new();
+    writer.write_bits(1, 1); // BFINAL (single block)
+    writer.write_bits(2, 2); // BTYPE=10 (dynamic)
+
+    writer.write_bits(hlit as u32, 5); // HLIT
+    writer.write_bits(hdist as u32, 5); // HDIST
+    writer.write_bits(hclen as u32, 4); // HCLEN (number of code length codes - 4)
+
+    // Write code length code lengths in order
+    for &idx in cl_order.iter().take(hclen as usize + 4) {
+        writer.write_bits(cl_codes[idx].length as u32, 3);
+    }
+
+    // Write the RLE-encoded code lengths
+    for (sym, extra_bits, extra_len) in rle {
+        let code = cl_codes[sym as usize];
+        writer.write_bits(reverse_bits(code.code, code.length), code.length);
+        if extra_len > 0 {
+            writer.write_bits(extra_bits as u32, extra_len);
+        }
+    }
+
+    // Data block using dynamic codes
+    for token in tokens {
+        match *token {
+            Token::Literal(byte) => {
+                let code = lit_codes[byte as usize];
+                writer.write_bits(reverse_bits(code.code, code.length), code.length);
+            }
+            Token::Match { length, distance } => {
+                let (len_symbol, len_extra_bits, len_extra_value) = length_code(length);
+                let len_code = lit_codes[len_symbol as usize];
+                writer.write_bits(reverse_bits(len_code.code, len_code.length), len_code.length);
+                if len_extra_bits > 0 {
+                    writer.write_bits(len_extra_value as u32, len_extra_bits);
+                }
+
+                let (dist_symbol, dist_extra_bits, dist_extra_value) = distance_code(distance);
+                let dist_code = dist_codes[dist_symbol as usize];
+                writer.write_bits(reverse_bits(dist_code.code, dist_code.length), dist_code.length);
+                if dist_extra_bits > 0 {
+                    writer.write_bits(dist_extra_value as u32, dist_extra_bits);
+                }
+            }
+        }
+    }
+
+    // End of block
+    let eob_code = lit_codes[256];
+    writer.write_bits(reverse_bits(eob_code.code, eob_code.length), eob_code.length);
+
+    writer.finish()
+}
+
+fn last_nonzero(lengths: &[u8]) -> usize {
+    lengths
+        .iter()
+        .rposition(|&l| l != 0)
+        .map(|i| i + 1)
+        .unwrap_or(1) // minimum 1 code
+}
+
+/// RLE encode literal/dist code lengths and collect code length code frequencies.
+fn rle_code_lengths(
+    lit_lengths: &[u8],
+    dist_lengths: &[u8],
+    cl_freqs: &mut [u32],
+) -> Vec<(u8, u8, u8)> {
+    let mut seq = Vec::new();
+    seq.extend_from_slice(lit_lengths);
+    seq.extend_from_slice(dist_lengths);
+
+    let mut encoded = Vec::new();
+    let mut i = 0;
+    while i < seq.len() {
+        let curr = seq[i];
+        let mut run = 1;
+        while i + run < seq.len() && seq[i + run] == curr {
+            run += 1;
+        }
+
+        if curr == 0 {
+            let mut rem = run;
+            while rem > 0 {
+                if rem >= 11 {
+                    let take = rem.min(138);
+                    encoded.push((18, (take - 11) as u8, 7));
+                    cl_freqs[18] += 1;
+                    rem -= take;
+                } else if rem >= 3 {
+                    let take = rem.min(10);
+                    encoded.push((17, (take - 3) as u8, 3));
+                    cl_freqs[17] += 1;
+                    rem -= take;
+                } else {
+                    encoded.push((0, 0, 0));
+                    cl_freqs[0] += 1;
+                    rem -= 1;
+                }
+            }
+        } else {
+            // emit first occurrence
+            encoded.push((curr, 0, 0));
+            cl_freqs[curr as usize] += 1;
+            let mut rem = run - 1;
+            while rem >= 3 {
+                let take = rem.min(6);
+                encoded.push((16, (take - 3) as u8, 2));
+                cl_freqs[16] += 1;
+                rem -= take;
+            }
+            while rem > 0 {
+                encoded.push((curr, 0, 0));
+                cl_freqs[curr as usize] += 1;
+                rem -= 1;
+            }
+        }
+
+        i += run;
+    }
+
+    encoded
 }
 
 /// Reverse bits in a code (DEFLATE uses reversed bit order for Huffman codes).
