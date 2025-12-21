@@ -4,6 +4,37 @@
 //! between adjacent pixels.
 
 use super::{FilterStrategy, PngOptions};
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
+/// Scratch buffers reused for adaptive filtering to reduce per-row allocations.
+struct AdaptiveScratch {
+    none: Vec<u8>,
+    sub: Vec<u8>,
+    up: Vec<u8>,
+    avg: Vec<u8>,
+    paeth: Vec<u8>,
+}
+
+impl AdaptiveScratch {
+    fn new(row_len: usize) -> Self {
+        Self {
+            none: Vec::with_capacity(row_len),
+            sub: Vec::with_capacity(row_len),
+            up: Vec::with_capacity(row_len),
+            avg: Vec::with_capacity(row_len),
+            paeth: Vec::with_capacity(row_len),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.none.clear();
+        self.sub.clear();
+        self.up.clear();
+        self.avg.clear();
+        self.paeth.clear();
+    }
+}
 
 /// Filter type bytes as defined by PNG specification.
 const FILTER_NONE: u8 = 0;
@@ -25,41 +56,37 @@ pub fn apply_filters(
     let row_bytes = width as usize * bytes_per_pixel;
     let filtered_row_size = row_bytes + 1; // +1 for filter type byte
 
-    let mut output = Vec::with_capacity(filtered_row_size * height as usize);
+    // Parallel path (only for adaptive; other strategies are trivial)
+    #[cfg(feature = "parallel")]
+    {
+        if matches!(options.filter_strategy, FilterStrategy::Adaptive) && height > 1 {
+            return apply_filters_parallel(
+                data,
+                height as usize,
+                row_bytes,
+                bytes_per_pixel,
+                filtered_row_size,
+                options.filter_strategy,
+            );
+        }
+    }
 
-    // Previous row (starts as zeros)
+    // Sequential path
+    let mut output = Vec::with_capacity(filtered_row_size * height as usize);
     let mut prev_row = vec![0u8; row_bytes];
+    let mut adaptive_scratch = AdaptiveScratch::new(row_bytes);
 
     for y in 0..height as usize {
         let row_start = y * row_bytes;
         let row = &data[row_start..row_start + row_bytes];
-
-        match options.filter_strategy {
-            FilterStrategy::None => {
-                output.push(FILTER_NONE);
-                output.extend_from_slice(row);
-            }
-            FilterStrategy::Sub => {
-                output.push(FILTER_SUB);
-                filter_sub(row, bytes_per_pixel, &mut output);
-            }
-            FilterStrategy::Up => {
-                output.push(FILTER_UP);
-                filter_up(row, &prev_row, &mut output);
-            }
-            FilterStrategy::Average => {
-                output.push(FILTER_AVERAGE);
-                filter_average(row, &prev_row, bytes_per_pixel, &mut output);
-            }
-            FilterStrategy::Paeth => {
-                output.push(FILTER_PAETH);
-                filter_paeth(row, &prev_row, bytes_per_pixel, &mut output);
-            }
-            FilterStrategy::Adaptive => {
-                // Try all filters and pick the best one
-                adaptive_filter(row, &prev_row, bytes_per_pixel, &mut output);
-            }
-        }
+        filter_row(
+            row,
+            if y == 0 { &[] } else { &prev_row },
+            bytes_per_pixel,
+            options.filter_strategy,
+            &mut output,
+            &mut adaptive_scratch,
+        );
 
         // Update previous row
         prev_row.copy_from_slice(row);
@@ -128,30 +155,29 @@ fn paeth_predictor(a: u8, b: u8, c: u8) -> u8 {
 }
 
 /// Adaptive filter selection: try all filters and pick the best.
-fn adaptive_filter(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
-    let row_len = row.len();
+fn adaptive_filter(
+    row: &[u8],
+    prev_row: &[u8],
+    bpp: usize,
+    output: &mut Vec<u8>,
+    scratch: &mut AdaptiveScratch,
+) {
+    scratch.clear();
 
-    // Buffers for each filter type
-    let mut none_buf = Vec::with_capacity(row_len);
-    let mut sub_buf = Vec::with_capacity(row_len);
-    let mut up_buf = Vec::with_capacity(row_len);
-    let mut avg_buf = Vec::with_capacity(row_len);
-    let mut paeth_buf = Vec::with_capacity(row_len);
+    // Apply each filter into reusable buffers
+    scratch.none.extend_from_slice(row);
+    filter_sub(row, bpp, &mut scratch.sub);
+    filter_up(row, prev_row, &mut scratch.up);
+    filter_average(row, prev_row, bpp, &mut scratch.avg);
+    filter_paeth(row, prev_row, bpp, &mut scratch.paeth);
 
-    // Apply each filter
-    none_buf.extend_from_slice(row);
-    filter_sub(row, bpp, &mut sub_buf);
-    filter_up(row, prev_row, &mut up_buf);
-    filter_average(row, prev_row, bpp, &mut avg_buf);
-    filter_paeth(row, prev_row, bpp, &mut paeth_buf);
-
-    // Score each filter (sum of absolute differences - lower is better for compression)
+    // Score each filter (sum of absolute values - lower is better for compression)
     let scores = [
-        (FILTER_NONE, score_filter(&none_buf)),
-        (FILTER_SUB, score_filter(&sub_buf)),
-        (FILTER_UP, score_filter(&up_buf)),
-        (FILTER_AVERAGE, score_filter(&avg_buf)),
-        (FILTER_PAETH, score_filter(&paeth_buf)),
+        (FILTER_NONE, score_filter(&scratch.none)),
+        (FILTER_SUB, score_filter(&scratch.sub)),
+        (FILTER_UP, score_filter(&scratch.up)),
+        (FILTER_AVERAGE, score_filter(&scratch.avg)),
+        (FILTER_PAETH, score_filter(&scratch.paeth)),
     ];
 
     // Find the filter with the lowest score
@@ -160,13 +186,111 @@ fn adaptive_filter(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>
     // Output the best filter result
     output.push(*best_filter);
     match *best_filter {
-        FILTER_NONE => output.extend_from_slice(&none_buf),
-        FILTER_SUB => output.extend_from_slice(&sub_buf),
-        FILTER_UP => output.extend_from_slice(&up_buf),
-        FILTER_AVERAGE => output.extend_from_slice(&avg_buf),
-        FILTER_PAETH => output.extend_from_slice(&paeth_buf),
+        FILTER_NONE => output.extend_from_slice(&scratch.none),
+        FILTER_SUB => output.extend_from_slice(&scratch.sub),
+        FILTER_UP => output.extend_from_slice(&scratch.up),
+        FILTER_AVERAGE => output.extend_from_slice(&scratch.avg),
+        FILTER_PAETH => output.extend_from_slice(&scratch.paeth),
         _ => unreachable!(),
     }
+}
+
+/// Filter a single row with the configured strategy.
+fn filter_row(
+    row: &[u8],
+    prev_row: &[u8],
+    bpp: usize,
+    strategy: FilterStrategy,
+    output: &mut Vec<u8>,
+    scratch: &mut AdaptiveScratch,
+) {
+    match strategy {
+        FilterStrategy::None => {
+            output.push(FILTER_NONE);
+            output.extend_from_slice(row);
+        }
+        FilterStrategy::Sub => {
+            output.push(FILTER_SUB);
+            filter_sub(row, bpp, output);
+        }
+        FilterStrategy::Up => {
+            output.push(FILTER_UP);
+            let mut zero = Vec::new();
+            let p = if prev_row.is_empty() {
+                zero.resize(row.len(), 0);
+                &zero[..]
+            } else {
+                prev_row
+            };
+            filter_up(row, p, output);
+        }
+        FilterStrategy::Average => {
+            output.push(FILTER_AVERAGE);
+            let mut zero = Vec::new();
+            let p = if prev_row.is_empty() {
+                zero.resize(row.len(), 0);
+                &zero[..]
+            } else {
+                prev_row
+            };
+            filter_average(row, p, bpp, output);
+        }
+        FilterStrategy::Paeth => {
+            output.push(FILTER_PAETH);
+            let mut zero = Vec::new();
+            let p = if prev_row.is_empty() {
+                zero.resize(row.len(), 0);
+                &zero[..]
+            } else {
+                prev_row
+            };
+            filter_paeth(row, p, bpp, output);
+        }
+        FilterStrategy::Adaptive => {
+            let mut zero = Vec::new();
+            let p = if prev_row.is_empty() {
+                zero.resize(row.len(), 0);
+                &zero[..]
+            } else {
+                prev_row
+            };
+            adaptive_filter(row, p, bpp, output, scratch);
+        }
+    }
+}
+
+#[cfg(feature = "parallel")]
+fn apply_filters_parallel(
+    data: &[u8],
+    height: usize,
+    row_bytes: usize,
+    bpp: usize,
+    filtered_row_size: usize,
+    strategy: FilterStrategy,
+) -> Vec<u8> {
+    let zero_row = vec![0u8; row_bytes];
+    let rows: Vec<Vec<u8>> = (0..height)
+        .into_par_iter()
+        .map(|y| {
+            let row_start = y * row_bytes;
+            let row = &data[row_start..row_start + row_bytes];
+            let prev = if y == 0 {
+                &zero_row[..]
+            } else {
+                &data[(y - 1) * row_bytes..y * row_bytes]
+            };
+            let mut out = Vec::with_capacity(filtered_row_size);
+            let mut scratch = AdaptiveScratch::new(row_bytes);
+            filter_row(row, prev, bpp, strategy, &mut out, &mut scratch);
+            out
+        })
+        .collect();
+
+    let mut output = Vec::with_capacity(filtered_row_size * height);
+    for row in rows {
+        output.extend_from_slice(&row);
+    }
+    output
 }
 
 /// Score a filtered row using sum of absolute values.

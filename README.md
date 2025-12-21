@@ -10,6 +10,10 @@ A minimal-dependency, high-performance image compression library written in Rust
 - **High performance** - Optimized for speed with minimal allocations
 - **Simple API** - Easy to use with sensible defaults
 
+## Toolchain
+
+The test and bench suites currently require **Rust nightly** (e.g., `rustc 1.94.0-nightly`) because transitive dependencies (`aligned` via `image`) opt into `edition2024`. Use `rustup override set nightly` in this workspace to match the CI/tooling expectation.
+
 ## Installation
 
 Add to your `Cargo.toml`:
@@ -34,7 +38,7 @@ let png_data = png::encode(&pixels, 3, 1, ColorType::Rgb).unwrap();
 use comprs::png::{PngOptions, FilterStrategy};
 
 let options = PngOptions {
-    compression_level: 9,  // 1-9, higher = better compression
+    compression_level: 9,  // validated: 1-9, higher = better compression
     filter_strategy: FilterStrategy::Adaptive,
 };
 let png_data = png::encode_with_options(&pixels, 3, 1, ColorType::Rgb, &options).unwrap();
@@ -48,6 +52,16 @@ use comprs::jpeg;
 // Encode RGB pixels as JPEG
 let pixels: Vec<u8> = vec![255, 128, 64]; // 1 RGB pixel
 let jpeg_data = jpeg::encode(&pixels, 1, 1, 85).unwrap(); // quality: 1-100
+
+// With subsampling options (4:4:4 default, 4:2:0 available)
+use comprs::jpeg::{JpegOptions, Subsampling};
+
+let options = JpegOptions {
+    quality: 85,
+    subsampling: Subsampling::S420, // downsample chroma for smaller files
+    restart_interval: None,         // Some(n) inserts DRI markers every n MCUs
+};
+let jpeg_data = jpeg::encode_with_options(&pixels, 1, 1, 85, ColorType::Rgb, &options).unwrap();
 ```
 
 ### Supported Color Types
@@ -58,6 +72,11 @@ let jpeg_data = jpeg::encode(&pixels, 1, 1, 85).unwrap(); // quality: 1-100
 - `ColorType::Rgba` - RGBA (4 bytes/pixel)
 
 Note: JPEG only supports `Gray` and `Rgb` color types.
+
+### Performance toggles
+
+- `parallel` feature enables rayon-powered parallel PNG adaptive filtering.
+- `simd` (planned) is reserved for future SIMD acceleration paths.
 
 ## Architecture
 
@@ -96,8 +115,9 @@ comprs/
 
 2. **DEFLATE Compression** (RFC 1951)
    - LZ77 with 32KB sliding window and hash chains
-   - Huffman coding (fixed codes)
-   - Configurable compression levels
+   - Huffman coding (auto-selects fixed vs dynamic)
+   - Stored-block fallback for incompressible data
+   - Wrapped as zlib (RFC 1950) for PNG IDAT
 
 3. **CRC32 Checksums** - Table-based for speed
 
@@ -117,24 +137,37 @@ comprs/
 
 ## Benchmarks
 
-Run benchmarks comparing against the `image` crate:
+- **Encoding benches**: compare PNG/JPEG against the `image` crate (`benches/encode_benchmark.rs`) for size and throughput.
+- **Deflate microbench**: compare `deflate_zlib` against `flate2` on compressible and random 1 MiB payloads (`benches/deflate_micro.rs`), reporting throughput in bytes.
+
+Run all benches:
 
 ```bash
 cargo bench
 ```
 
+Run a specific bench:
+
+```bash
+cargo bench --bench encode_benchmark
+cargo bench --bench deflate_micro
+```
+
 ## Testing
 
-Run the test suite:
+Run the full suite:
 
 ```bash
 cargo test
 ```
 
-The library includes:
-- Unit tests for all algorithms
-- PNG conformance tests
-- JPEG conformance tests
+Coverage highlights:
+- Unit tests for bits/LZ77/Huffman/CRC/Adler and codec internals.
+- Property-based tests for PNG/JPEG decode/roundtrip robustness.
+- Structural checks (CRC/length for PNG chunks; marker ordering/DRI for JPEG).
+- Conformance harnesses: PngSuite and libjpeg-turbo corpus (skip gracefully offline).
+
+Note: tests and benches are validated on nightly toolchain; ensure `rustup override set nightly` in this repo to align with CI/tooling.
 
 ## Optional Features
 

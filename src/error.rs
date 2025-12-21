@@ -24,6 +24,8 @@ pub enum Error {
     },
     /// Invalid quality parameter (must be 1-100 for JPEG).
     InvalidQuality(u8),
+    /// Invalid compression level parameter (must be 1-9 for PNG/zlib).
+    InvalidCompressionLevel(u8),
     /// Image dimensions exceed maximum supported size.
     ImageTooLarge {
         /// Image width.
@@ -54,6 +56,9 @@ impl fmt::Display for Error {
             }
             Error::InvalidQuality(q) => {
                 write!(f, "Invalid quality {}: must be 1-100", q)
+            }
+            Error::InvalidCompressionLevel(level) => {
+                write!(f, "Invalid compression level {}: must be 1-9", level)
             }
             Error::ImageTooLarge { width, height, max } => {
                 write!(

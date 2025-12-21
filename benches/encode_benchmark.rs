@@ -43,9 +43,9 @@ fn png_encoding_benchmark(c: &mut Criterion) {
 
     for size in [64, 128, 256, 512].iter() {
         let pixels = generate_test_image(*size, *size);
-        let pixel_count = (*size as u64) * (*size as u64);
+        let pixel_bytes = (*size as u64) * (*size as u64) * 3;
 
-        group.throughput(Throughput::Elements(pixel_count));
+        group.throughput(Throughput::Bytes(pixel_bytes));
 
         group.bench_with_input(
             BenchmarkId::new("comprs", format!("{}x{}", size, size)),
@@ -87,16 +87,40 @@ fn jpeg_encoding_benchmark(c: &mut Criterion) {
 
     for size in [64, 128, 256, 512].iter() {
         let pixels = generate_test_image(*size, *size);
-        let pixel_count = (*size as u64) * (*size as u64);
+        let pixel_bytes = (*size as u64) * (*size as u64) * 3;
 
-        group.throughput(Throughput::Elements(pixel_count));
+        group.throughput(Throughput::Bytes(pixel_bytes));
+
+        let opts_420 = jpeg::JpegOptions {
+            quality: 85,
+            subsampling: jpeg::Subsampling::S420,
+            restart_interval: None,
+        };
 
         group.bench_with_input(
-            BenchmarkId::new("comprs_q85", format!("{}x{}", size, size)),
+            BenchmarkId::new("comprs_q85_444", format!("{}x{}", size, size)),
             &pixels,
             |b, pixels| {
                 b.iter(|| {
                     jpeg::encode(black_box(pixels), *size, *size, 85).unwrap()
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("comprs_q85_420", format!("{}x{}", size, size)),
+            &pixels,
+            |b, pixels| {
+                b.iter(|| {
+                    jpeg::encode_with_options(
+                        black_box(pixels),
+                        *size,
+                        *size,
+                        85,
+                        ColorType::Rgb,
+                        &opts_420,
+                    )
+                    .unwrap()
                 });
             },
         );
@@ -137,7 +161,7 @@ fn compression_ratio_benchmark(c: &mut Criterion) {
         let noisy = generate_noisy_image(*width, *height);
 
         // Gradient image - should compress well
-        group.bench_function("PNG gradient", |b| {
+        group.bench_function("PNG gradient (comprs)", |b| {
             b.iter(|| {
                 let result = png::encode(black_box(&gradient), *width, *height, ColorType::Rgb).unwrap();
                 result.len()
@@ -145,19 +169,69 @@ fn compression_ratio_benchmark(c: &mut Criterion) {
         });
 
         // Noisy image - harder to compress
-        group.bench_function("PNG noisy", |b| {
+        group.bench_function("PNG noisy (comprs)", |b| {
             b.iter(|| {
                 let result = png::encode(black_box(&noisy), *width, *height, ColorType::Rgb).unwrap();
                 result.len()
             });
         });
 
+        // PNG via image crate for comparison
+        group.bench_function("PNG gradient (image crate)", |b| {
+            b.iter(|| {
+                let mut output = Vec::new();
+                let encoder = image::codecs::png::PngEncoder::new(&mut output);
+                encoder
+                    .write_image(
+                        black_box(&gradient),
+                        *width,
+                        *height,
+                        image::ExtendedColorType::Rgb8,
+                    )
+                    .unwrap();
+                output.len()
+            });
+        });
+
+        group.bench_function("PNG noisy (image crate)", |b| {
+            b.iter(|| {
+                let mut output = Vec::new();
+                let encoder = image::codecs::png::PngEncoder::new(&mut output);
+                encoder
+                    .write_image(
+                        black_box(&noisy),
+                        *width,
+                        *height,
+                        image::ExtendedColorType::Rgb8,
+                    )
+                    .unwrap();
+                output.len()
+            });
+        });
+
         // JPEG quality comparison
         for quality in [50, 75, 90].iter() {
-            group.bench_function(format!("JPEG q{}", quality), |b| {
+            group.bench_function(format!("JPEG q{} (comprs)", quality), |b| {
                 b.iter(|| {
                     let result = jpeg::encode(black_box(&gradient), *width, *height, *quality).unwrap();
                     result.len()
+                });
+            });
+
+            group.bench_function(format!("JPEG q{} (image crate)", quality), |b| {
+                b.iter(|| {
+                    let mut output = Vec::new();
+                    let encoder =
+                        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, *quality);
+                    encoder
+                        .write_image(
+                            black_box(&gradient),
+                            *width,
+                            *height,
+                            image::ExtendedColorType::Rgb8,
+                        )
+                        .unwrap();
+                    output.len()
                 });
             });
         }

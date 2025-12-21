@@ -3,7 +3,13 @@
 //! Tests PNG encoding against expected output and validates
 //! that encoded images can be decoded correctly.
 
-use comprs::{png, ColorType};
+use comprs::{png, ColorType, Error};
+use image::GenericImageView;
+use rand::{rngs::StdRng, Rng, SeedableRng};
+use proptest::prelude::*;
+use comprs::compress::crc32::crc32;
+mod support;
+use support::pngsuite::read_pngsuite;
 
 /// Test that PNG output has correct header.
 #[test]
@@ -115,6 +121,200 @@ fn test_different_images() {
     assert_ne!(black_png, white_png);
 }
 
+/// Ensure encoded PNGs decode correctly via the `image` crate (zlib wrapper validity).
+#[test]
+fn test_png_roundtrip_decode_rgb() {
+    let width = 3;
+    let height = 2;
+    let pixels = vec![
+        // row 0
+        255, 0, 0, // red
+        0, 255, 0, // green
+        0, 0, 255, // blue
+        // row 1
+        255, 255, 0, // yellow
+        0, 255, 255, // cyan
+        255, 0, 255, // magenta
+    ];
+
+    let encoded = png::encode(&pixels, width, height, ColorType::Rgb).unwrap();
+
+    let decoded = image::load_from_memory(&encoded).expect("decode").to_rgb8();
+    assert_eq!(decoded.width(), width);
+    assert_eq!(decoded.height(), height);
+    assert_eq!(decoded.as_raw(), &pixels);
+}
+
+/// Randomized small-images roundtrip across color types to ensure decodability.
+#[test]
+fn test_png_roundtrip_random_small() {
+    let mut rng = StdRng::seed_from_u64(42);
+    let dims = [(1, 1), (2, 3), (3, 2), (4, 4), (8, 5)];
+    let color_types = [
+        ColorType::Gray,
+        ColorType::GrayAlpha,
+        ColorType::Rgb,
+        ColorType::Rgba,
+    ];
+
+    for &(w, h) in &dims {
+        for &ct in &color_types {
+            let bpp = ct.bytes_per_pixel();
+            let mut pixels = vec![0u8; (w * h) as usize * bpp];
+            rng.fill(pixels.as_mut_slice());
+
+            let encoded =
+                png::encode(&pixels, w as u32, h as u32, ct).expect("encode random png");
+            let decoded = image::load_from_memory(&encoded).expect("decode").to_rgba8();
+
+            assert_eq!(decoded.width(), w as u32);
+            assert_eq!(decoded.height(), h as u32);
+        }
+    }
+}
+
+/// Validate chunk lengths and CRCs for a generated PNG.
+#[test]
+fn test_png_chunk_crc_and_lengths() {
+    let mut rng = StdRng::seed_from_u64(777);
+    let w = 12;
+    let h = 7;
+    let mut pixels = vec![0u8; (w * h * 3) as usize];
+    rng.fill(pixels.as_mut_slice());
+
+    let encoded = png::encode(&pixels, w, h, ColorType::Rgb).unwrap();
+
+    // PNG signature already validated elsewhere
+    let mut offset = 8;
+    let mut saw_iend = false;
+
+    while offset < encoded.len() {
+        // length (u32 big-endian)
+        assert!(offset + 8 <= encoded.len(), "truncated chunk header");
+        let len = u32::from_be_bytes(encoded[offset..offset + 4].try_into().unwrap()) as usize;
+        let chunk_type = &encoded[offset + 4..offset + 8];
+        offset += 8;
+
+        assert!(
+            offset + len + 4 <= encoded.len(),
+            "chunk overruns buffer: type={:?} len={}",
+            chunk_type,
+            len
+        );
+
+        let data = &encoded[offset..offset + len];
+        offset += len;
+
+        let stored_crc = u32::from_be_bytes(encoded[offset..offset + 4].try_into().unwrap());
+        offset += 4;
+
+        // CRC computed over type + data
+        let mut payload = Vec::with_capacity(4 + len);
+        payload.extend_from_slice(chunk_type);
+        payload.extend_from_slice(data);
+        let computed_crc = crc32(&payload);
+        assert_eq!(
+            stored_crc, computed_crc,
+            "CRC mismatch for chunk {:?}",
+            chunk_type
+        );
+
+        if chunk_type == b"IEND" {
+            saw_iend = true;
+            break;
+        }
+    }
+
+    assert!(saw_iend, "IEND not found");
+}
+
+fn png_image_strategy() -> impl Strategy<Value = (u32, u32, ColorType, Vec<u8>)> {
+    (1u32..16, 1u32..16)
+        .prop_flat_map(|(w, h)| {
+            prop_oneof![
+                Just(ColorType::Gray),
+                Just(ColorType::GrayAlpha),
+                Just(ColorType::Rgb),
+                Just(ColorType::Rgba),
+            ]
+            .prop_flat_map(move |ct| {
+                let len = (w * h) as usize * ct.bytes_per_pixel();
+                proptest::collection::vec(any::<u8>(), len)
+                    .prop_map(move |data| (w, h, ct, data))
+            })
+        })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+    #[test]
+    fn prop_png_roundtrip_varied_color((w, h, ct, data) in png_image_strategy()) {
+        let encoded = png::encode(&data, w, h, ct).unwrap();
+        let decoded = image::load_from_memory(&encoded).expect("decode");
+
+        match ct {
+            ColorType::Gray => {
+                let gray = decoded.to_luma8();
+                prop_assert_eq!(gray.width(), w);
+                prop_assert_eq!(gray.height(), h);
+                prop_assert_eq!(gray.as_raw(), &data);
+            }
+            ColorType::GrayAlpha => {
+                let rgba = decoded.to_rgba8();
+                prop_assert_eq!(rgba.width(), w);
+                prop_assert_eq!(rgba.height(), h);
+                let mut expected = Vec::with_capacity((w * h * 4) as usize);
+                for chunk in data.chunks(2) {
+                    let g = chunk[0];
+                    let a = chunk[1];
+                    expected.extend_from_slice(&[g, g, g, a]);
+                }
+                prop_assert_eq!(rgba.as_raw(), &expected);
+            }
+            ColorType::Rgb => {
+                let rgb = decoded.to_rgb8();
+                prop_assert_eq!(rgb.width(), w);
+                prop_assert_eq!(rgb.height(), h);
+                prop_assert_eq!(rgb.as_raw(), &data);
+            }
+            ColorType::Rgba => {
+                let rgba = decoded.to_rgba8();
+                prop_assert_eq!(rgba.width(), w);
+                prop_assert_eq!(rgba.height(), h);
+                prop_assert_eq!(rgba.as_raw(), &data);
+            }
+        }
+    }
+}
+
+/// Conformance: encode output of PngSuite fixtures and ensure decode success.
+#[test]
+fn test_pngsuite_encode_and_decode() {
+    let Ok(cases) = read_pngsuite() else {
+        eprintln!("Skipping PngSuite test: fixtures unavailable (offline?)");
+        return;
+    };
+
+    for (path, bytes) in cases {
+        // Decode using `image` as source pixels
+        let img = image::load_from_memory(&bytes).expect("decode fixture");
+        let rgba = img.to_rgba8();
+        let (w, h) = img.dimensions();
+
+        // Encode through our pipeline (RGBA)
+        let encoded = png::encode(rgba.as_raw(), w, h, ColorType::Rgba).unwrap();
+
+        // Decode the encoded PNG to ensure validity
+        let decoded = image::load_from_memory(&encoded).expect("decode reencoded");
+        assert_eq!(
+            decoded.dimensions(),
+            (w, h),
+            "dimension mismatch for {:?}",
+            path
+        );
+    }
+}
+
 /// Test filter strategies produce valid output.
 #[test]
 fn test_filter_strategies() {
@@ -182,6 +382,24 @@ fn test_invalid_input() {
     assert!(png::encode(&[0, 0, 0, 0], 1, 1, ColorType::Rgb).is_err()); // Too long
 }
 
+#[test]
+fn test_invalid_compression_level() {
+    let pixels = vec![0u8; 4 * 4 * 3];
+    let opts = png::PngOptions {
+        compression_level: 0,
+        ..Default::default()
+    };
+    let err = png::encode_with_options(&pixels, 4, 4, ColorType::Rgb, &opts).unwrap_err();
+    assert!(matches!(err, Error::InvalidCompressionLevel(0)));
+
+    let opts = png::PngOptions {
+        compression_level: 10,
+        ..Default::default()
+    };
+    let err = png::encode_with_options(&pixels, 4, 4, ColorType::Rgb, &opts).unwrap_err();
+    assert!(matches!(err, Error::InvalidCompressionLevel(10)));
+}
+
 /// Test large image encoding.
 #[test]
 fn test_large_image() {
@@ -195,4 +413,27 @@ fn test_large_image() {
     // IHDR should have correct dimensions
     assert_eq!(&result[16..20], &[0, 0, 0x03, 0xE8]); // 1000 in big-endian
     assert_eq!(&result[20..24], &[0, 0, 0x03, 0xE8]);
+}
+
+/// Encoding should be deterministic for identical inputs.
+#[test]
+fn test_png_deterministic() {
+    let mut rng = StdRng::seed_from_u64(2024);
+    let w = 16;
+    let h = 8;
+    let mut pixels = vec![0u8; (w * h * 3) as usize];
+    rng.fill(pixels.as_mut_slice());
+
+    let a = png::encode(&pixels, w, h, ColorType::Rgb).unwrap();
+    let b = png::encode(&pixels, w, h, ColorType::Rgb).unwrap();
+    assert_eq!(a, b);
+}
+
+/// Reject images exceeding maximum dimension without requiring huge allocations.
+#[test]
+fn test_png_rejects_image_too_large() {
+    let width = (1 << 24) + 1; // just over MAX_DIMENSION
+    let height = 1;
+    let err = png::encode(&[], width, height, ColorType::Rgb).unwrap_err();
+    assert!(matches!(err, Error::ImageTooLarge { .. }));
 }
