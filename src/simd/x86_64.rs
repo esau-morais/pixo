@@ -187,6 +187,37 @@ pub unsafe fn match_length_sse2(data: &[u8], pos1: usize, pos2: usize, max_len: 
     length
 }
 
+/// Compute match length using AVX2 32-byte comparison.
+///
+/// # Safety
+/// Caller must ensure AVX2 is available on the current CPU.
+#[target_feature(enable = "avx2")]
+pub unsafe fn match_length_avx2(data: &[u8], pos1: usize, pos2: usize, max_len: usize) -> usize {
+    let mut length = 0;
+
+    // Compare 32 bytes at a time
+    while length + 32 <= max_len {
+        let a = _mm256_loadu_si256(data[pos1 + length..].as_ptr() as *const __m256i);
+        let b = _mm256_loadu_si256(data[pos2 + length..].as_ptr() as *const __m256i);
+        let cmp = _mm256_cmpeq_epi8(a, b);
+        let mask = _mm256_movemask_epi8(cmp) as u32;
+
+        if mask != 0xFFFF_FFFF {
+            // Find first differing byte
+            let diff = (!mask) & 0xFFFF_FFFF;
+            return length + diff.trailing_zeros() as usize;
+        }
+        length += 32;
+    }
+
+    // Fall back to SSE2 for remaining bytes (at most 31 bytes)
+    if length < max_len {
+        length + match_length_sse2(data, pos1 + length, pos2 + length, max_len - length)
+    } else {
+        length
+    }
+}
+
 /// Score a filtered row using SSE2 SAD instruction.
 ///
 /// # Safety

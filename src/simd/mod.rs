@@ -51,6 +51,10 @@ pub fn crc32(data: &[u8]) -> u32 {
 pub fn match_length(data: &[u8], pos1: usize, pos2: usize, max_len: usize) -> usize {
     #[cfg(target_arch = "x86_64")]
     {
+        if is_x86_feature_detected!("avx2") {
+            // Safety: We've verified AVX2 is available
+            return unsafe { x86_64::match_length_avx2(data, pos1, pos2, max_len) };
+        }
         if is_x86_feature_detected!("sse2") {
             // Safety: We've verified SSE2 is available
             return unsafe { x86_64::match_length_sse2(data, pos1, pos2, max_len) };
