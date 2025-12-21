@@ -197,6 +197,60 @@ impl Lz77Compressor {
         }
     }
 
+    /// Compress data and return packed tokens (4 bytes each) for cache-friendly encoding.
+    /// This does not change the parsing—only the representation of tokens.
+    pub fn compress_packed(&mut self, data: &[u8]) -> Vec<PackedToken> {
+        let mut tokens = Vec::with_capacity(data.len());
+        self.compress_packed_into(data, &mut tokens);
+        tokens
+    }
+
+    /// Compress data into a provided packed token buffer, reusing allocations.
+    /// Semantics match `compress`, but outputs `PackedToken` instead of `Token`.
+    pub fn compress_packed_into(&mut self, data: &[u8], tokens: &mut Vec<PackedToken>) {
+        if data.is_empty() {
+            tokens.clear();
+            return;
+        }
+
+        tokens.clear();
+        tokens.reserve(data.len());
+        let mut pos = 0;
+
+        // Reset hash tables
+        self.head.fill(-1);
+        self.prev.fill(-1);
+
+        while pos < data.len() {
+            let best_match = self.find_best_match(data, pos);
+
+            if let Some((length, distance)) = best_match {
+                if self.lazy_matching && length < GOOD_MATCH_LENGTH && pos + 1 < data.len() {
+                    self.update_hash(data, pos);
+
+                    if let Some((next_length, _)) = self.find_best_match(data, pos + 1) {
+                        if next_length > length + 1 {
+                            tokens.push(PackedToken::literal(data[pos]));
+                            pos += 1;
+                            continue;
+                        }
+                    }
+                }
+
+                tokens.push(PackedToken::match_(length as u16, distance as u16));
+
+                for i in 0..length {
+                    self.update_hash(data, pos + i);
+                }
+                pos += length;
+            } else {
+                tokens.push(PackedToken::literal(data[pos]));
+                self.update_hash(data, pos);
+                pos += 1;
+            }
+        }
+    }
+
     /// Find the best match at the given position.
     fn find_best_match(&self, data: &[u8], pos: usize) -> Option<(usize, usize)> {
         if pos + MIN_MATCH_LENGTH > data.len() {
