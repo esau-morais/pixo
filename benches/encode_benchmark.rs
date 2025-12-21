@@ -43,9 +43,9 @@ fn png_encoding_benchmark(c: &mut Criterion) {
 
     for size in [64, 128, 256, 512].iter() {
         let pixels = generate_test_image(*size, *size);
-        let pixel_count = (*size as u64) * (*size as u64);
+        let pixel_bytes = (*size as u64) * (*size as u64) * 3;
 
-        group.throughput(Throughput::Elements(pixel_count));
+        group.throughput(Throughput::Bytes(pixel_bytes));
 
         group.bench_with_input(
             BenchmarkId::new("comprs", format!("{}x{}", size, size)),
@@ -87,9 +87,9 @@ fn jpeg_encoding_benchmark(c: &mut Criterion) {
 
     for size in [64, 128, 256, 512].iter() {
         let pixels = generate_test_image(*size, *size);
-        let pixel_count = (*size as u64) * (*size as u64);
+        let pixel_bytes = (*size as u64) * (*size as u64) * 3;
 
-        group.throughput(Throughput::Elements(pixel_count));
+        group.throughput(Throughput::Bytes(pixel_bytes));
 
         group.bench_with_input(
             BenchmarkId::new("comprs_q85", format!("{}x{}", size, size)),
