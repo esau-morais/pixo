@@ -188,6 +188,8 @@ fn adaptive_filter(
 
     let mut best_filter = FILTER_NONE;
     let mut best_score = u64::MAX;
+    // Early-stop threshold: if a candidate beats this, skip remaining filters.
+    let early_stop = (row.len() as u64 / 8).saturating_add(1);
 
     // Try None filter first
     scratch.none.extend_from_slice(row);
@@ -195,6 +197,11 @@ fn adaptive_filter(
     if score < best_score {
         best_score = score;
         best_filter = FILTER_NONE;
+        if best_score <= early_stop {
+            output.push(best_filter);
+            output.extend_from_slice(&scratch.none);
+            return;
+        }
     }
 
     // A score of 0 means all zeros - can't do better
@@ -210,7 +217,7 @@ fn adaptive_filter(
     if score < best_score {
         best_score = score;
         best_filter = FILTER_SUB;
-        if best_score == 0 {
+        if best_score == 0 || best_score <= early_stop {
             output.push(best_filter);
             output.extend_from_slice(&scratch.sub);
             return;
@@ -223,7 +230,7 @@ fn adaptive_filter(
     if score < best_score {
         best_score = score;
         best_filter = FILTER_UP;
-        if best_score == 0 {
+        if best_score == 0 || best_score <= early_stop {
             output.push(best_filter);
             output.extend_from_slice(&scratch.up);
             return;
@@ -236,7 +243,7 @@ fn adaptive_filter(
     if score < best_score {
         best_score = score;
         best_filter = FILTER_AVERAGE;
-        if best_score == 0 {
+        if best_score == 0 || best_score <= early_stop {
             output.push(best_filter);
             output.extend_from_slice(&scratch.avg);
             return;
@@ -372,7 +379,10 @@ fn score_filter(filtered: &[u8]) -> u64 {
 
     #[cfg(not(feature = "simd"))]
     {
-        filtered.iter().map(|&b| (b as i8).unsigned_abs() as u64).sum()
+        filtered
+            .iter()
+            .map(|&b| (b as i8).unsigned_abs() as u64)
+            .sum()
     }
 }
 
