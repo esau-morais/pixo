@@ -24,6 +24,10 @@ pub mod fallback;
 pub fn adler32(data: &[u8]) -> u32 {
     #[cfg(target_arch = "x86_64")]
     {
+        if is_x86_feature_detected!("avx2") {
+            // Safety: We've verified AVX2 is available
+            return unsafe { x86_64::adler32_avx2(data) };
+        }
         if is_x86_feature_detected!("ssse3") {
             // Safety: We've verified SSSE3 is available
             return unsafe { x86_64::adler32_ssse3(data) };

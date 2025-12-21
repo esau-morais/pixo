@@ -218,6 +218,84 @@ pub unsafe fn match_length_avx2(data: &[u8], pos1: usize, pos2: usize, max_len: 
     }
 }
 
+/// Compute Adler-32 checksum using AVX2 instructions (32-byte chunks).
+///
+/// # Safety
+/// Caller must ensure AVX2 is available on the current CPU.
+#[target_feature(enable = "avx2")]
+pub unsafe fn adler32_avx2(data: &[u8]) -> u32 {
+    const MOD_ADLER: u32 = 65_521;
+    const NMAX: usize = 5552; // same as scalar/SSSE3 path
+
+    let mut s1: u32 = 1;
+    let mut s2: u32 = 0;
+    let mut processed = 0usize;
+
+    let zeros = _mm256_setzero_si256();
+    // weights 32..1
+    let weights = _mm256_setr_epi8(
+        32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10,
+        9, 8, 7, 6, 5, 4, 3, 2, 1,
+    );
+
+    let mut chunks = data.chunks_exact(32);
+    for chunk in &mut chunks {
+        // Load chunk
+        let v = _mm256_loadu_si256(chunk.as_ptr() as *const __m256i);
+
+        // Sum of bytes via SAD
+        let sad = _mm256_sad_epu8(v, zeros);
+        let mut sad_buf = [0i64; 4];
+        _mm256_storeu_si256(sad_buf.as_mut_ptr() as *mut __m256i, sad);
+        let chunk_sum = (sad_buf[0] + sad_buf[1] + sad_buf[2] + sad_buf[3]) as u32;
+
+        // Weighted sum for s2
+        let v_lo = _mm256_unpacklo_epi8(v, zeros);
+        let v_hi = _mm256_unpackhi_epi8(v, zeros);
+        let w_lo = _mm256_unpacklo_epi8(weights, zeros);
+        let w_hi = _mm256_unpackhi_epi8(weights, zeros);
+
+        let prod_lo = _mm256_madd_epi16(v_lo, w_lo); // 8 i32 lanes
+        let prod_hi = _mm256_madd_epi16(v_hi, w_hi); // 8 i32 lanes
+        let sum_prod = _mm256_add_epi32(prod_lo, prod_hi);
+
+        // Horizontal sum of sum_prod
+        let tmp1 = _mm256_hadd_epi32(sum_prod, sum_prod);
+        let tmp2 = _mm256_hadd_epi32(tmp1, tmp1);
+        let mut prod_buf = [0i32; 8];
+        _mm256_storeu_si256(prod_buf.as_mut_ptr() as *mut __m256i, tmp2);
+        let weighted_sum = (prod_buf[0] as i64 + prod_buf[4] as i64) as u32;
+
+        s2 = s2.wrapping_add(s1.wrapping_mul(32));
+        s2 = s2.wrapping_add(weighted_sum);
+        s1 = s1.wrapping_add(chunk_sum);
+
+        processed += 32;
+        if processed >= NMAX {
+            s1 %= MOD_ADLER;
+            s2 %= MOD_ADLER;
+            processed = 0;
+        }
+    }
+
+    // Remainder (less than 32 bytes) scalar
+    for &b in chunks.remainder() {
+        s1 = s1.wrapping_add(b as u32);
+        s2 = s2.wrapping_add(s1);
+        processed += 1;
+        if processed >= NMAX {
+            s1 %= MOD_ADLER;
+            s2 %= MOD_ADLER;
+            processed = 0;
+        }
+    }
+
+    s1 %= MOD_ADLER;
+    s2 %= MOD_ADLER;
+
+    (s2 << 16) | s1
+}
+
 /// Score a filtered row using SSE2 SAD instruction.
 ///
 /// # Safety
