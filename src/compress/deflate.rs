@@ -110,18 +110,40 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
 ///
 /// Produces: zlib header (CMF/FLG), deflate stream, Adler-32 checksum.
 pub fn deflate_zlib(data: &[u8], level: u8) -> Vec<u8> {
-    let mut output = Vec::with_capacity(data.len() / 2 + 16);
-
-    let header = zlib_header(level);
-    output.extend_from_slice(&header);
+    // For empty input, keep the fixed-Huffman minimal block.
+    if data.is_empty() {
+        let mut output = Vec::with_capacity(8);
+        output.extend_from_slice(&zlib_header(level));
+        output.extend_from_slice(&deflate(data, level));
+        output.extend_from_slice(&adler32(data).to_be_bytes());
+        return output;
+    }
 
     let deflated = deflate(data, level);
-    output.extend_from_slice(&deflated);
 
-    let checksum = adler32(data);
-    output.extend_from_slice(&checksum.to_be_bytes());
+    let use_stored = should_use_stored(data.len(), deflated.len());
 
+    let mut output = Vec::with_capacity(deflated.len().min(data.len()) + 32);
+    output.extend_from_slice(&zlib_header(level));
+
+    if use_stored {
+        let stored_blocks = deflate_stored(data);
+        output.extend_from_slice(&stored_blocks);
+    } else {
+        output.extend_from_slice(&deflated);
+    }
+
+    output.extend_from_slice(&adler32(data).to_be_bytes());
     output
+}
+
+/// Decide whether stored blocks would be smaller than the compressed stream.
+fn should_use_stored(data_len: usize, deflated_len: usize) -> bool {
+    // Stored block size: data + 5 bytes per 65535 chunk
+    let stored_overhead = (data_len / 65_535 + 1) * 5;
+    let stored_total = data_len + stored_overhead + 2 /*zlib hdr*/ + 4 /*adler*/;
+    let deflated_total = deflated_len + 2 /*zlib hdr*/ + 4 /*adler*/;
+    deflated_total >= stored_total
 }
 
 /// Encode tokens using fixed Huffman codes.
@@ -306,5 +328,15 @@ mod tests {
         assert_eq!(reverse_bits(0b101, 3), 0b101);
         assert_eq!(reverse_bits(0b100, 3), 0b001);
         assert_eq!(reverse_bits(0b11110000, 8), 0b00001111);
+    }
+
+    #[test]
+    fn test_should_use_stored_threshold() {
+        // Deflated larger than stored -> use stored
+        assert!(should_use_stored(1000, 1200));
+        // Deflated smaller -> keep deflated
+        assert!(!should_use_stored(1000, 400));
+        // Near-equal totals prefer stored
+        assert!(should_use_stored(1000, 1010));
     }
 }
