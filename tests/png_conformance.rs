@@ -172,23 +172,62 @@ fn test_png_roundtrip_random_small() {
     }
 }
 
-fn png_rgb_image_strategy() -> impl Strategy<Value = (u32, u32, Vec<u8>)> {
-    (1u32..16, 1u32..16).prop_flat_map(|(w, h)| {
-        let len = (w * h * 3) as usize;
-        proptest::collection::vec(any::<u8>(), len).prop_map(move |data| (w, h, data))
-    })
+fn png_image_strategy() -> impl Strategy<Value = (u32, u32, ColorType, Vec<u8>)> {
+    (1u32..16, 1u32..16)
+        .prop_flat_map(|(w, h)| {
+            prop_oneof![
+                Just(ColorType::Gray),
+                Just(ColorType::GrayAlpha),
+                Just(ColorType::Rgb),
+                Just(ColorType::Rgba),
+            ]
+            .prop_flat_map(move |ct| {
+                let len = (w * h) as usize * ct.bytes_per_pixel();
+                proptest::collection::vec(any::<u8>(), len)
+                    .prop_map(move |data| (w, h, ct, data))
+            })
+        })
 }
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
     #[test]
-    fn prop_png_roundtrip_rgb_lossless((w, h, data) in png_rgb_image_strategy()) {
-        let encoded = png::encode(&data, w, h, ColorType::Rgb).unwrap();
-        let decoded = image::load_from_memory(&encoded).expect("decode").to_rgb8();
+    fn prop_png_roundtrip_varied_color((w, h, ct, data) in png_image_strategy()) {
+        let encoded = png::encode(&data, w, h, ct).unwrap();
+        let decoded = image::load_from_memory(&encoded).expect("decode");
 
-        prop_assert_eq!(decoded.width(), w);
-        prop_assert_eq!(decoded.height(), h);
-        prop_assert_eq!(decoded.as_raw(), &data);
+        match ct {
+            ColorType::Gray => {
+                let gray = decoded.to_luma8();
+                prop_assert_eq!(gray.width(), w);
+                prop_assert_eq!(gray.height(), h);
+                prop_assert_eq!(gray.as_raw(), &data);
+            }
+            ColorType::GrayAlpha => {
+                let rgba = decoded.to_rgba8();
+                prop_assert_eq!(rgba.width(), w);
+                prop_assert_eq!(rgba.height(), h);
+                let mut expected = Vec::with_capacity((w * h * 4) as usize);
+                for chunk in data.chunks(2) {
+                    let g = chunk[0];
+                    let a = chunk[1];
+                    expected.extend_from_slice(&[g, g, g, a]);
+                }
+                prop_assert_eq!(rgba.as_raw(), &expected);
+            }
+            ColorType::Rgb => {
+                let rgb = decoded.to_rgb8();
+                prop_assert_eq!(rgb.width(), w);
+                prop_assert_eq!(rgb.height(), h);
+                prop_assert_eq!(rgb.as_raw(), &data);
+            }
+            ColorType::Rgba => {
+                let rgba = decoded.to_rgba8();
+                prop_assert_eq!(rgba.width(), w);
+                prop_assert_eq!(rgba.height(), h);
+                prop_assert_eq!(rgba.as_raw(), &data);
+            }
+        }
     }
 }
 

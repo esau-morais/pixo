@@ -289,22 +289,44 @@ fn test_jpeg_restart_interval_marker_and_decode() {
 }
 
 fn jpeg_case_strategy(
-) -> impl Strategy<Value = (u32, u32, u8, jpeg::Subsampling, Option<u16>, Vec<u8>)> {
-    (
-        1u32..24,
-        1u32..24,
-        30u8..96,
-        prop_oneof![
-            Just(jpeg::Subsampling::S444),
-            Just(jpeg::Subsampling::S420),
-        ],
-        prop_oneof![Just(None), (1u16..8u16).prop_map(Some)],
-    )
-        .prop_flat_map(|(w, h, q, subsampling, restart_interval)| {
-            let len = (w * h * 3) as usize;
-            proptest::collection::vec(any::<u8>(), len).prop_map(move |data| {
-                (w, h, q, subsampling, restart_interval, data)
-            })
+) -> impl Strategy<Value = (u32, u32, u8, ColorType, jpeg::Subsampling, Option<u16>, Vec<u8>)> {
+    (1u32..24, 1u32..24, 30u8..96)
+        .prop_flat_map(|(w, h, q)| {
+            prop_oneof![Just(ColorType::Rgb), Just(ColorType::Gray)].prop_flat_map(
+                move |color_type| {
+                    let bytes_per_pixel = match color_type {
+                        ColorType::Rgb => 3,
+                        ColorType::Gray => 1,
+                        _ => unreachable!(),
+                    };
+                    let subsampling = if matches!(color_type, ColorType::Rgb) {
+                        prop_oneof![
+                            Just(jpeg::Subsampling::S444),
+                            Just(jpeg::Subsampling::S420),
+                        ]
+                        .boxed()
+                    } else {
+                        Just(jpeg::Subsampling::S444).boxed()
+                    };
+                    let restart = prop_oneof![Just(None), (1u16..8u16).prop_map(Some)];
+                    (subsampling, restart).prop_flat_map(move |(subsampling, restart_interval)| {
+                        let len = (w * h) as usize * bytes_per_pixel;
+                        proptest::collection::vec(any::<u8>(), len).prop_map(
+                            move |data| {
+                                (
+                                    w,
+                                    h,
+                                    q,
+                                    color_type,
+                                    subsampling,
+                                    restart_interval,
+                                    data,
+                                )
+                            },
+                        )
+                    })
+                },
+            )
         })
 }
 
@@ -312,7 +334,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(24))]
     #[test]
     fn prop_jpeg_decode_randomized_options(
-        (w, h, quality, subsampling, restart_interval, data) in jpeg_case_strategy()
+        (w, h, quality, color_type, subsampling, restart_interval, data) in jpeg_case_strategy()
     ) {
         let opts = jpeg::JpegOptions {
             quality,
@@ -320,7 +342,8 @@ proptest! {
             restart_interval,
         };
 
-        let encoded = jpeg::encode_with_options(&data, w, h, quality, ColorType::Rgb, &opts).unwrap();
+        let encoded =
+            jpeg::encode_with_options(&data, w, h, quality, color_type, &opts).unwrap();
 
         if restart_interval.is_some() {
             prop_assert!(encoded.windows(2).any(|w| w == [0xFF, 0xDD]));
