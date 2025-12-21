@@ -2,10 +2,12 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 
 // Small curated JPEG fixtures (libjpeg-turbo test images).
+#[allow(dead_code)]
 pub const JPEG_FIXTURES: &[(&str, &str, &str)] = &[
     (
         "testorig.jpg",

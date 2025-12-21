@@ -2,10 +2,12 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 
 // Minimal SHA map (url -> sha256) for integrity. Extend as needed.
+#[allow(dead_code)]
 const PNGSUITE_SHA256: &[(&str, &str)] = &[
     ("basn0g01.png", "dcf043b2d8f7d37f564f59c56b2fc4d128be2ee417bf249d0edb991690e54cfb"),
     ("basn0g02.png", "1dca5ea66c60e1a3c63e99c2242e42ec6e6a3acc3604dc1306469ea48475e19d"),
