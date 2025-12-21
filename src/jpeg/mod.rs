@@ -40,6 +40,7 @@ pub fn encode(data: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u
     let options = JpegOptions {
         quality,
         subsampling: Subsampling::S444,
+        restart_interval: None,
     };
     encode_with_options(data, width, height, quality, ColorType::Rgb, &options)
 }
@@ -55,6 +56,7 @@ pub fn encode_with_color(
     let options = JpegOptions {
         quality,
         subsampling: Subsampling::S444,
+        restart_interval: None,
     };
     encode_with_options(data, width, height, quality, color_type, &options)
 }
@@ -75,6 +77,8 @@ pub struct JpegOptions {
     pub quality: u8,
     /// Subsampling scheme.
     pub subsampling: Subsampling,
+    /// Restart interval in MCUs (None = disabled).
+    pub restart_interval: Option<u16>,
 }
 
 impl Default for JpegOptions {
@@ -82,6 +86,7 @@ impl Default for JpegOptions {
         Self {
             quality: 75,
             subsampling: Subsampling::S444,
+            restart_interval: None,
         }
     }
 }
@@ -98,6 +103,9 @@ pub fn encode_with_options(
     // Validate quality
     if options.quality == 0 || options.quality > 100 {
         return Err(Error::InvalidQuality(options.quality));
+    }
+    if matches!(options.restart_interval, Some(0)) {
+        return Err(Error::InvalidQuality(0)); // reuse quality error type for invalid param
     }
 
     // Validate dimensions
@@ -141,6 +149,9 @@ pub fn encode_with_options(
     write_dqt(&mut output, &quant_tables);
     write_sof0(&mut output, width, height, color_type, options.subsampling);
     write_dht(&mut output, &huff_tables);
+    if let Some(interval) = options.restart_interval {
+        write_dri(&mut output, interval);
+    }
 
     // Write scan data
     write_sos(&mut output, color_type);
@@ -150,6 +161,7 @@ pub fn encode_with_options(
         width,
         height,
         color_type,
+        options.restart_interval,
         options.subsampling,
         &quant_tables,
         &huff_tables,
@@ -286,6 +298,13 @@ fn write_dht(output: &mut Vec<u8>, tables: &HuffmanTables) {
     write_huffman_table(output, 0x11, &tables.ac_chrom_bits, &tables.ac_chrom_vals);
 }
 
+/// Write DRI (Define Restart Interval) marker.
+fn write_dri(output: &mut Vec<u8>, interval: u16) {
+    output.extend_from_slice(&0xFFDDu16.to_be_bytes());
+    output.extend_from_slice(&4u16.to_be_bytes()); // length = 4
+    output.extend_from_slice(&interval.to_be_bytes());
+}
+
 /// Write a single Huffman table.
 fn write_huffman_table(output: &mut Vec<u8>, table_id: u8, bits: &[u8; 16], vals: &[u8]) {
     output.extend_from_slice(&DHT.to_be_bytes());
@@ -350,6 +369,7 @@ fn encode_scan(
     width: u32,
     height: u32,
     color_type: ColorType,
+    restart_interval: Option<u16>,
     subsampling: Subsampling,
     quant_tables: &QuantizationTables,
     huff_tables: &HuffmanTables,
@@ -369,6 +389,26 @@ fn encode_scan(
     let mut prev_dc_y = 0i16;
     let mut prev_dc_cb = 0i16;
     let mut prev_dc_cr = 0i16;
+    let mut rst_idx = 0u8;
+    let mut mcu_count: u32 = 0;
+
+    let handle_restart = |writer: &mut BitWriterMsb,
+                          prev_dc_y: &mut i16,
+                          prev_dc_cb: &mut i16,
+                          prev_dc_cr: &mut i16,
+                          mcu_count: u32,
+                          rst_idx: &mut u8| {
+        if let Some(interval) = restart_interval {
+            if interval > 0 && mcu_count % interval as u32 == 0 {
+                writer.flush();
+                writer.write_bytes(&[0xFF, 0xD0 + (*rst_idx & 0x07)]);
+                *rst_idx = (*rst_idx + 1) & 0x07;
+                *prev_dc_y = 0;
+                *prev_dc_cb = 0;
+                *prev_dc_cr = 0;
+            }
+        }
+    };
 
     // Process blocks
     match (color_type, subsampling) {
@@ -385,6 +425,15 @@ fn encode_scan(
                         prev_dc_y,
                         true,
                         huff_tables,
+                    );
+                    mcu_count += 1;
+                    handle_restart(
+                        &mut writer,
+                        &mut prev_dc_y,
+                        &mut prev_dc_cb,
+                        &mut prev_dc_cr,
+                        mcu_count,
+                        &mut rst_idx,
                     );
                 }
             }
@@ -423,6 +472,16 @@ fn encode_scan(
                         prev_dc_cr,
                         false,
                         huff_tables,
+                    );
+
+                    mcu_count += 1;
+                    handle_restart(
+                        &mut writer,
+                        &mut prev_dc_y,
+                        &mut prev_dc_cb,
+                        &mut prev_dc_cr,
+                        mcu_count,
+                        &mut rst_idx,
                     );
                 }
             }
@@ -466,6 +525,16 @@ fn encode_scan(
                         prev_dc_cr,
                         false,
                         huff_tables,
+                    );
+
+                    mcu_count += 1;
+                    handle_restart(
+                        &mut writer,
+                        &mut prev_dc_y,
+                        &mut prev_dc_cb,
+                        &mut prev_dc_cr,
+                        mcu_count,
+                        &mut rst_idx,
                     );
                 }
             }

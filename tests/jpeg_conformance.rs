@@ -233,10 +233,12 @@ fn test_jpeg_subsampling_420() {
     let opts_444 = jpeg::JpegOptions {
         quality: 75,
         subsampling: jpeg::Subsampling::S444,
+        restart_interval: None,
     };
     let opts_420 = jpeg::JpegOptions {
         quality: 75,
         subsampling: jpeg::Subsampling::S420,
+        restart_interval: None,
     };
 
     let jpeg_444 =
