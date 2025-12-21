@@ -10,6 +10,10 @@ A minimal-dependency, high-performance image compression library written in Rust
 - **High performance** - Optimized for speed with minimal allocations
 - **Simple API** - Easy to use with sensible defaults
 
+## Toolchain
+
+The test and bench suites currently require **Rust nightly** (e.g., `rustc 1.94.0-nightly`) because transitive dependencies (`aligned` via `image`) opt into `edition2024`. Use `rustup override set nightly` in this workspace to match the CI/tooling expectation.
+
 ## Installation
 
 Add to your `Cargo.toml`:
@@ -161,6 +165,8 @@ Coverage highlights:
 - Property-based tests for PNG/JPEG decode/roundtrip robustness.
 - Structural checks (CRC/length for PNG chunks; marker ordering/DRI for JPEG).
 - Conformance harnesses: PngSuite and libjpeg-turbo corpus (skip gracefully offline).
+
+Note: tests and benches are validated on nightly toolchain; ensure `rustup override set nightly` in this repo to align with CI/tooling.
 
 ## Optional Features
 
