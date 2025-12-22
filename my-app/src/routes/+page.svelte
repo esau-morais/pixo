@@ -55,6 +55,29 @@
 		subsampling420: true
 	};
 
+	const jobDefaults = {
+		png: {
+			format: 'png' as const,
+			quality: 85,
+			compressionLevel: 6,
+			filter: 'adaptive' as PngFilter,
+			subsampling420: true
+		},
+		jpeg: {
+			format: 'jpeg' as const,
+			quality: 85,
+			compressionLevel: 6,
+			filter: 'adaptive' as PngFilter,
+			subsampling420: true
+		}
+	};
+
+	function deriveOptionsFromType(mime: string) {
+		if (mime === 'image/png') return { ...jobDefaults.png };
+		if (mime === 'image/jpeg' || mime === 'image/jpg') return { ...jobDefaults.jpeg };
+		return { ...defaultOptions };
+	}
+
 	const canvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
 	const ctx = canvas ? canvas.getContext('2d', { willReadFrequently: true }) : null;
 
@@ -116,6 +139,7 @@ function detectAlpha(data: Uint8ClampedArray) {
 			const { imageData, width, height, hasAlpha } = await decodeFile(file);
 			const url = URL.createObjectURL(file);
 			const id = crypto.randomUUID();
+			const initialOptions = deriveOptionsFromType(file.type);
 			jobs = [
 				...jobs,
 				{
@@ -130,7 +154,7 @@ function detectAlpha(data: Uint8ClampedArray) {
 					imageData,
 					status: 'idle',
 					slider: 50,
-					options: { ...defaultOptions }
+					options: { ...initialOptions }
 				}
 			];
 		}
