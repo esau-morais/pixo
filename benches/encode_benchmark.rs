@@ -47,12 +47,21 @@ fn png_encoding_benchmark(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(pixel_bytes));
 
+        let mut png_buf = Vec::new();
         group.bench_with_input(
             BenchmarkId::new("comprs", format!("{}x{}", size, size)),
             &pixels,
             |b, pixels| {
                 b.iter(|| {
-                    png::encode(black_box(pixels), *size, *size, ColorType::Rgb).unwrap()
+                    png::encode_into(
+                        &mut png_buf,
+                        black_box(pixels),
+                        *size,
+                        *size,
+                        ColorType::Rgb,
+                        &png::PngOptions::default(),
+                    )
+                    .unwrap()
                 });
             },
         );
@@ -101,9 +110,7 @@ fn jpeg_encoding_benchmark(c: &mut Criterion) {
             BenchmarkId::new("comprs_q85_444", format!("{}x{}", size, size)),
             &pixels,
             |b, pixels| {
-                b.iter(|| {
-                    jpeg::encode(black_box(pixels), *size, *size, 85).unwrap()
-                });
+                b.iter(|| jpeg::encode(black_box(pixels), *size, *size, 85).unwrap());
             },
         );
 
@@ -132,7 +139,8 @@ fn jpeg_encoding_benchmark(c: &mut Criterion) {
             |b, pixels| {
                 b.iter(|| {
                     let mut output = Vec::new();
-                    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, 85);
+                    let encoder =
+                        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, 85);
                     encoder
                         .write_image(
                             black_box(pixels),
@@ -160,19 +168,37 @@ fn compression_ratio_benchmark(c: &mut Criterion) {
         let gradient = generate_test_image(*width, *height);
         let noisy = generate_noisy_image(*width, *height);
 
+        let mut png_buf = Vec::new();
+
         // Gradient image - should compress well
         group.bench_function("PNG gradient (comprs)", |b| {
             b.iter(|| {
-                let result = png::encode(black_box(&gradient), *width, *height, ColorType::Rgb).unwrap();
-                result.len()
+                png::encode_into(
+                    &mut png_buf,
+                    black_box(&gradient),
+                    *width,
+                    *height,
+                    ColorType::Rgb,
+                    &png::PngOptions::default(),
+                )
+                .unwrap();
+                png_buf.len()
             });
         });
 
         // Noisy image - harder to compress
         group.bench_function("PNG noisy (comprs)", |b| {
             b.iter(|| {
-                let result = png::encode(black_box(&noisy), *width, *height, ColorType::Rgb).unwrap();
-                result.len()
+                png::encode_into(
+                    &mut png_buf,
+                    black_box(&noisy),
+                    *width,
+                    *height,
+                    ColorType::Rgb,
+                    &png::PngOptions::default(),
+                )
+                .unwrap();
+                png_buf.len()
             });
         });
 
@@ -213,7 +239,8 @@ fn compression_ratio_benchmark(c: &mut Criterion) {
         for quality in [50, 75, 90].iter() {
             group.bench_function(format!("JPEG q{} (comprs)", quality), |b| {
                 b.iter(|| {
-                    let result = jpeg::encode(black_box(&gradient), *width, *height, *quality).unwrap();
+                    let result =
+                        jpeg::encode(black_box(&gradient), *width, *height, *quality).unwrap();
                     result.len()
                 });
             });
