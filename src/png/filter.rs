@@ -445,9 +445,12 @@ fn apply_filters_parallel(
     strategy: FilterStrategy,
 ) -> Vec<u8> {
     let zero_row = vec![0u8; row_bytes];
-    let rows: Vec<Vec<u8>> = (0..height)
-        .into_par_iter()
-        .map(|y| {
+    let mut output = vec![0u8; filtered_row_size * height];
+
+    output
+        .par_chunks_mut(filtered_row_size)
+        .enumerate()
+        .for_each(|(y, out_row)| {
             let row_start = y * row_bytes;
             let row = &data[row_start..row_start + row_bytes];
             let prev = if y == 0 {
@@ -455,17 +458,17 @@ fn apply_filters_parallel(
             } else {
                 &data[(y - 1) * row_bytes..y * row_bytes]
             };
-            let mut out = Vec::with_capacity(filtered_row_size);
             let mut scratch = AdaptiveScratch::new(row_bytes);
-            filter_row(row, prev, bpp, strategy, &mut out, &mut scratch);
-            out
-        })
-        .collect();
+            let mut row_buf = Vec::with_capacity(filtered_row_size);
+            filter_row(row, prev, bpp, strategy, &mut row_buf, &mut scratch);
+            debug_assert_eq!(
+                row_buf.len(),
+                filtered_row_size,
+                "filtered row size mismatch"
+            );
+            out_row.copy_from_slice(&row_buf);
+        });
 
-    let mut output = Vec::with_capacity(filtered_row_size * height);
-    for row in rows {
-        output.extend_from_slice(&row);
-    }
     output
 }
 
