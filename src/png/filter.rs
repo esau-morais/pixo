@@ -96,7 +96,13 @@ pub fn apply_filters(
             FilterStrategy::AdaptiveSampled { interval } if interval > 1 => {
                 let interval = interval.max(1) as usize;
                 let prev = if y == 0 { &zero_row[..] } else { prev_row };
-                if y % interval == 0 {
+                // Dynamic interval: more sampling on small images, coarser on tall images.
+                let eff_interval = if height as usize > 512 {
+                    interval.max(4)
+                } else {
+                    interval
+                };
+                if y % eff_interval == 0 {
                     let base = output.len();
                     adaptive_filter(
                         row,
