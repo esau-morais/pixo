@@ -118,16 +118,48 @@ fn bench_filters(c: &mut Criterion) {
     let width = 512;
     let height = 512;
     let pixels = gradient_image(width, height);
-    let options = PngOptions {
-        filter_strategy: FilterStrategy::Adaptive,
-        ..Default::default()
-    };
 
     let mut group = c.benchmark_group("png_filters");
     let bytes = pixels.len() as u64;
     group.throughput(Throughput::Bytes(bytes));
 
     group.bench_function("adaptive_512_rgb", |b| {
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::Adaptive,
+            ..Default::default()
+        };
+        b.iter(|| {
+            black_box(apply_filters(
+                black_box(&pixels),
+                width,
+                height,
+                3,
+                black_box(&options),
+            ));
+        });
+    });
+
+    group.bench_function("adaptive_fast_512_rgb", |b| {
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::AdaptiveFast,
+            ..Default::default()
+        };
+        b.iter(|| {
+            black_box(apply_filters(
+                black_box(&pixels),
+                width,
+                height,
+                3,
+                black_box(&options),
+            ));
+        });
+    });
+
+    group.bench_function("adaptive_sampled4_512_rgb", |b| {
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::AdaptiveSampled { interval: 4 },
+            ..Default::default()
+        };
         b.iter(|| {
             black_box(apply_filters(
                 black_box(&pixels),
