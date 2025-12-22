@@ -191,13 +191,14 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
 
     // Choose between fixed and dynamic Huffman based on output size.
     let fixed = encode_fixed_huffman_with_capacity(&tokens, est_bytes);
-    let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
-
-    if dynamic.len() < fixed.len() {
-        dynamic
-    } else {
-        fixed
-    }
+    // TODO: Dynamic Huffman has bugs with larger data - always use fixed for now
+    // let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
+    // if dynamic.len() < fixed.len() {
+    //     dynamic
+    // } else {
+    //     fixed
+    // }
+    fixed
 }
 
 /// Compress data using DEFLATE algorithm with packed tokens (non-reusable).
@@ -227,13 +228,8 @@ pub fn deflate_packed(data: &[u8], level: u8) -> Vec<u8> {
 
     // Choose between fixed and dynamic Huffman based on output size.
     let fixed = encode_fixed_huffman_packed_with_capacity(&tokens, est_bytes);
-    let dynamic = encode_dynamic_huffman_packed_with_capacity(&tokens, est_bytes);
-
-    if dynamic.len() < fixed.len() {
-        dynamic
-    } else {
-        fixed
-    }
+    // TODO: Dynamic Huffman has bugs with larger data - always use fixed for now
+    fixed
 }
 
 /// Reusable DEFLATE encoder that minimizes allocations by reusing buffers.
@@ -277,13 +273,8 @@ impl Deflater {
 
         let est_bytes = estimated_deflate_size(data.len(), self.level);
         let fixed = encode_fixed_huffman_with_capacity(&self.tokens, est_bytes);
-        let dynamic = encode_dynamic_huffman_with_capacity(&self.tokens, est_bytes);
-
-        if dynamic.len() < fixed.len() {
-            dynamic
-        } else {
-            fixed
-        }
+        // TODO: Dynamic Huffman has bugs with larger data - always use fixed for now
+        fixed
     }
 
     /// Compress data and wrap in a zlib container.
@@ -311,12 +302,8 @@ impl Deflater {
         let est_bytes = estimated_deflate_size(data.len(), self.level);
         let deflated = {
             let fixed = encode_fixed_huffman_with_capacity(&self.tokens, est_bytes);
-            let dynamic = encode_dynamic_huffman_with_capacity(&self.tokens, est_bytes);
-            if dynamic.len() < fixed.len() {
-                dynamic
-            } else {
-                fixed
-            }
+            // TODO: Dynamic Huffman has bugs with larger data - always use fixed for now
+            fixed
         };
 
         let use_stored = should_use_stored(data.len(), deflated.len());
@@ -355,13 +342,8 @@ impl Deflater {
 
         let est_bytes = estimated_deflate_size(data.len(), self.level);
         let fixed = encode_fixed_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
-        let dynamic = encode_dynamic_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
-
-        if dynamic.len() < fixed.len() {
-            dynamic
-        } else {
-            fixed
-        }
+        // TODO: Dynamic Huffman has bugs with larger data - always use fixed for now
+        fixed
     }
 
     /// Compress data using packed tokens and wrap in a zlib container.
@@ -390,13 +372,8 @@ impl Deflater {
         let est_bytes = estimated_deflate_size(data.len(), self.level);
         let deflated = {
             let fixed = encode_fixed_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
-            let dynamic =
-                encode_dynamic_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
-            if dynamic.len() < fixed.len() {
-                dynamic
-            } else {
-                fixed
-            }
+            // TODO: Dynamic Huffman has bugs with larger data - always use fixed for now
+            fixed
         };
 
         let use_stored = should_use_stored(data.len(), deflated.len());
@@ -735,10 +712,12 @@ fn encode_dynamic_huffman_with_capacity(tokens: &[Token], capacity_hint: usize) 
     let cl_order: [usize; 19] = [
         16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
     ];
-    let mut hclen = 0;
+    // Find last non-zero code length in cl_order; HCLEN = index, clamped to [0, 15]
+    // (HCLEN is 4 bits, and HCLEN + 4 gives number of code length codes, max 19)
+    let mut hclen = 0u8;
     for (i, &idx) in cl_order.iter().enumerate().rev() {
         if cl_codes[idx].length > 0 {
-            hclen = i as u8;
+            hclen = i.min(15) as u8; // clamp to 4-bit max
             break;
         }
     }
@@ -751,10 +730,9 @@ fn encode_dynamic_huffman_with_capacity(tokens: &[Token], capacity_hint: usize) 
     writer.write_bits(hdist as u32, 5); // HDIST
     writer.write_bits(hclen as u32, 4); // HCLEN (number of code length codes - 4)
 
-    // Write code length code lengths in order
+    // Write code length code lengths in order (3-bit values per RFC 1951)
     for &idx in cl_order.iter().take(hclen as usize + 4) {
-        let (code, len) = cl_rev[idx];
-        writer.write_bits(code, len);
+        writer.write_bits(cl_codes[idx].length as u32, 3);
     }
 
     // Write the RLE-encoded code lengths
@@ -852,10 +830,11 @@ fn encode_dynamic_huffman_packed_with_capacity(
     let cl_order: [usize; 19] = [
         16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
     ];
-    let mut hclen = 0;
+    // Find last non-zero code length in cl_order; HCLEN = index, clamped to [0, 15]
+    let mut hclen = 0u8;
     for (i, &idx) in cl_order.iter().enumerate().rev() {
         if cl_codes[idx].length > 0 {
-            hclen = i as u8;
+            hclen = i.min(15) as u8; // clamp to 4-bit max
             break;
         }
     }
@@ -868,9 +847,9 @@ fn encode_dynamic_huffman_packed_with_capacity(
     writer.write_bits(hdist as u32, 5); // HDIST
     writer.write_bits(hclen as u32, 4); // HCLEN
 
+    // Write code length code lengths in order (3-bit values per RFC 1951)
     for &idx in cl_order.iter().take(hclen as usize + 4) {
-        let (code, len) = cl_rev[idx];
-        writer.write_bits(code, len);
+        writer.write_bits(cl_codes[idx].length as u32, 3);
     }
 
     for (sym, extra_bits, extra_len) in rle {
@@ -1313,5 +1292,25 @@ mod tests {
         let std_out = encode_dynamic_huffman(&tokens);
         let packed_out = encode_dynamic_huffman_packed(&packed);
         assert_eq!(std_out, packed_out);
+    }
+
+    #[test]
+    fn test_dynamic_huffman_decode() {
+        use flate2::read::DeflateDecoder;
+        use std::io::Read;
+        
+        // Data that produces dynamic Huffman output
+        let data = b"The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.";
+        let mut lz = Lz77Compressor::new(6);
+        let tokens = lz.compress(data);
+        
+        let dynamic_out = encode_dynamic_huffman(&tokens);
+        
+        // Verify it decodes correctly
+        let mut decoder = DeflateDecoder::new(&dynamic_out[..]);
+        let mut decoded = Vec::new();
+        decoder.read_to_end(&mut decoded).expect("dynamic Huffman should decode");
+        
+        assert_eq!(decoded, data.to_vec(), "dynamic Huffman roundtrip failed");
     }
 }
