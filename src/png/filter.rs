@@ -63,10 +63,12 @@ pub fn apply_filters(
     // Parallel path (only for adaptive; other strategies are trivial)
     #[cfg(feature = "parallel")]
     {
-        if matches!(
-            options.filter_strategy,
-            FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast
-        ) && height > 1
+        // Parallel gains when rows are numerous; avoid overhead on tiny images.
+        if height > 32
+            && matches!(
+                options.filter_strategy,
+                FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast
+            )
         {
             return apply_filters_parallel(
                 data,
