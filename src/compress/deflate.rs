@@ -249,7 +249,11 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
         return writer.finish();
     }
 
-    with_reusable_deflater(level, |deflater| deflater.compress(data))
+    if data.len() <= SMALL_INPUT_BYTES {
+        with_reusable_deflater(level, |deflater| deflater.compress_fixed_only(data))
+    } else {
+        with_reusable_deflater(level, |deflater| deflater.compress(data))
+    }
 }
 
 /// Compress data using DEFLATE algorithm with packed tokens (non-reusable).
@@ -270,7 +274,11 @@ pub fn deflate_packed(data: &[u8], level: u8) -> Vec<u8> {
         return writer.finish();
     }
 
-    with_reusable_deflater(level, |deflater| deflater.compress_packed(data))
+    if data.len() <= SMALL_INPUT_BYTES {
+        with_reusable_deflater(level, |deflater| deflater.compress_fixed_only_packed(data))
+    } else {
+        with_reusable_deflater(level, |deflater| deflater.compress_packed(data))
+    }
 }
 
 /// Reusable DEFLATE encoder that minimizes allocations by reusing buffers.
