@@ -86,7 +86,8 @@ jobs:
 
       - name: Optimize WASM
         run: |
-          wasm-opt -Oz --enable-bulk-memory -o ./web/src/lib/comprs-wasm/comprs_bg.wasm \
+          wasm-opt -Oz --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int \
+            -o ./web/src/lib/comprs-wasm/comprs_bg.wasm \
             ./web/src/lib/comprs-wasm/comprs_bg.wasm
 
       - name: Report WASM size
