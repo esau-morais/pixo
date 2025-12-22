@@ -37,6 +37,7 @@
 	let jobs: Job[] = [];
 	let dropActive = false;
 	let busy = false;
+	let notices: { id: string; message: string; tone: 'info' | 'warning' | 'error' }[] = [];
 
 	const filterOptions: { label: string; value: PngFilter; hint?: string }[] = [
 		{ label: 'Adaptive', value: 'adaptive', hint: 'Best compression' },
@@ -112,6 +113,18 @@ function detectAlpha(data: Uint8ClampedArray) {
 		return acceptMime.includes(file.type);
 	}
 
+	function addNotice(message: string, tone: 'info' | 'warning' | 'error' = 'warning') {
+		const id = crypto.randomUUID();
+		notices = [...notices, { id, message, tone }];
+		setTimeout(() => {
+			notices = notices.filter((n) => n.id !== id);
+		}, 4000);
+	}
+
+	function dismissNotice(id: string) {
+		notices = notices.filter((n) => n.id !== id);
+	}
+
 	function resetInput(event: Event) {
 		const target = event.target as HTMLInputElement;
 		target.value = '';
@@ -140,7 +153,7 @@ function detectAlpha(data: Uint8ClampedArray) {
 		const rejected = files.filter((f) => !isSupported(f));
 
 		if (rejected.length) {
-			alert(`Unsupported files skipped: ${rejected.map((f) => f.name).join(', ')}`);
+			addNotice(`Unsupported files skipped: ${rejected.map((f) => f.name).join(', ')}`, 'warning');
 		}
 		for (const file of supported) {
 			const { imageData, width, height, hasAlpha } = await decodeFile(file);
@@ -250,6 +263,31 @@ function detectAlpha(data: Uint8ClampedArray) {
 </svelte:head>
 
 <div class="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-10">
+	{#if notices.length}
+		<div class="space-y-2">
+			{#each notices as notice (notice.id)}
+				<div
+					class={`flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
+						notice.tone === 'error'
+							? 'border-rose-700/60 bg-rose-900/40 text-rose-50'
+							: notice.tone === 'warning'
+								? 'border-amber-700/60 bg-amber-900/40 text-amber-50'
+								: 'border-sky-700/60 bg-sky-900/40 text-sky-50'
+					}`}
+				>
+					<span>{notice.message}</span>
+					<button
+						class="text-xs text-slate-200 hover:text-white"
+						on:click={() => dismissNotice(notice.id)}
+						aria-label="Dismiss notification"
+					>
+						✕
+					</button>
+				</div>
+			{/each}
+		</div>
+	{/if}
+
 	<header class="space-y-3">
 		<p class="text-xs font-semibold uppercase tracking-[0.2em] text-sky-300/80">WASM powered</p>
 		<h1 class="text-3xl font-bold text-slate-50 sm:text-4xl">
