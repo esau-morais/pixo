@@ -64,6 +64,39 @@ let options = JpegOptions {
 let jpeg_data = jpeg::encode_with_options(&pixels, 1, 1, 85, ColorType::Rgb, &options).unwrap();
 ```
 
+### Buffer reuse (PNG & JPEG)
+
+Both encoders support writing into a caller-provided buffer to avoid repeated allocations when encoding multiple images in a loop:
+
+```rust
+// PNG
+let mut png_buf = Vec::new();
+png::encode_into(
+    &mut png_buf,
+    &pixels,
+    3,
+    1,
+    ColorType::Rgb,
+    &PngOptions::default(),
+).unwrap();
+
+// JPEG
+let mut jpg_buf = Vec::new();
+jpeg::encode_with_options_into(
+    &mut jpg_buf,
+    &pixels,
+    3,
+    1,
+    85,
+    ColorType::Rgb,
+    &jpeg::JpegOptions {
+        quality: 85,
+        subsampling: jpeg::Subsampling::S444,
+        restart_interval: None,
+    },
+).unwrap();
+```
+
 ### Command-Line Interface
 
 The library includes a CLI tool for quick image compression from the terminal. It only supports PNG and JPEG images in and out.
