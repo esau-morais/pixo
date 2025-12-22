@@ -270,6 +270,11 @@ Note: tests and benches are validated on nightly toolchain; ensure `rustup overr
 - `simd` *(default)* - Enable SIMD optimizations with runtime feature detection (falls back to scalar paths when unavailable)
 - `parallel` *(default)* - Enable parallel processing with rayon
 
+### Performance defaults (PNG)
+- Default compression level: **2** (favor speed)
+- Default filter strategy: **AdaptiveFast**, with height-aware sampling on tall images
+- SIMD + parallel enabled by default
+- Small inputs: prefer fixed Huffman (token thresholds tuned to avoid double encoding)
 ## Performance Notes
 
 - PNG compression uses adaptive filter selection for best compression
