@@ -664,6 +664,10 @@ function detectAlpha(data: Uint8ClampedArray) {
 								<button
 									class="btn-ghost"
 									on:click={() => {
+										const currentJob = jobs.find((j) => j.id === job.id);
+										if (currentJob?.result?.url) {
+											URL.revokeObjectURL(currentJob.result.url);
+										}
 										updateJob(job.id, (j) => ({
 											...j,
 											result: undefined,
@@ -685,13 +689,13 @@ function detectAlpha(data: Uint8ClampedArray) {
 									draggable="false"
 								/>
 								<div
-									class="absolute inset-0 overflow-hidden"
-									style={`clip-path: inset(0 0 0 0); width: ${job.slider}%;`}
+									class="absolute inset-0"
+									style={`clip-path: inset(0 ${100 - job.slider}% 0 0);`}
 								>
 									<img
 										src={job.result.url}
 										alt="Compressed"
-										class="h-full w-full object-contain"
+										class="absolute inset-0 h-full w-full object-contain"
 										draggable="false"
 									/>
 								</div>
