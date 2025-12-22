@@ -85,8 +85,9 @@ pub fn apply_filters(
         let row = &data[row_start..row_start + row_bytes];
         match options.filter_strategy {
             FilterStrategy::AdaptiveSampled { interval } if interval > 1 => {
+                let interval = interval.max(1) as usize;
                 let prev = &prev_row[..];
-                if y % interval as usize == 0 {
+                if y % interval == 0 {
                     let base = output.len();
                     adaptive_filter(
                         row,
