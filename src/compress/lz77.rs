@@ -118,8 +118,8 @@ impl Lz77Compressor {
         // Tune chain length and lazy matching based on level
         let (max_chain_length, lazy_matching) = match level {
             1 => (4, false),
-            2 => (8, false),
-            3 => (16, false),
+            2 => (6, false),
+            3 => (10, false),
             4 => (32, true),
             5 => (64, true),
             6 => (64, true), // trimmed further for speed at default level
