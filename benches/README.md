@@ -12,6 +12,7 @@ cargo bench
 cargo bench --bench encode_benchmark  # PNG/JPEG encoding vs image crate
 cargo bench --bench deflate_micro     # DEFLATE compression vs flate2
 cargo bench --bench components        # Component-level benchmarks (DCT, Huffman, etc.)
+cargo bench --bench comparison        # Full comparison with summary table
 ```
 
 ## Benchmark Suites
@@ -40,6 +41,40 @@ Component-level benchmarks for internal algorithms:
 - Huffman encoding/decoding
 - LZ77 compression
 - CRC32/Adler32 checksums
+
+### comparison
+
+Comprehensive library comparison benchmark that produces a detailed summary table:
+
+- **PNG encoding**: comprs vs image crate (gradient and noisy images)
+- **JPEG encoding**: comprs vs image crate (q85 with 4:4:4 and 4:2:0 subsampling)
+- **DEFLATE compression**: comprs vs flate2 (compressible and random data)
+- **Binary sizes**: WASM binary size comparison
+- **Output sizes**: Compressed output size comparison
+
+Run this benchmark for a formatted summary table:
+
+```bash
+cargo bench --bench comparison
+```
+
+The benchmark will print a table like:
+
+```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                         COMPRS BENCHMARK SUMMARY                             ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ WASM Binary Size Comparison                                                  │
+├────────────────────┬─────────────┬────────────────────────────────────────────┤
+│ Library            │ WASM Size   │ Notes                                      │
+├────────────────────┼─────────────┼────────────────────────────────────────────┤
+│ comprs             │      92 KB  │ Zero deps, pure Rust                       │
+│ image crate        │    ~2-4 MB  │ Pure Rust, many codecs                     │
+│ ...                │             │                                            │
+└────────────────────┴─────────────┴────────────────────────────────────────────┘
+```
 
 ---
 
