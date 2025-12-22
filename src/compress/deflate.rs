@@ -810,31 +810,52 @@ fn should_use_stored(data_len: usize, deflated_len: usize) -> bool {
     deflated_total >= stored_total
 }
 
-/// Detect high-entropy (likely incompressible) data by sampling neighboring deltas.
-/// Similar to the PNG filter heuristic: few equal neighbors and no dominant delta.
+/// Detect high-entropy (likely incompressible) data by sampling for repeated n-grams.
+/// 
+/// The previous heuristic (equal neighbors + delta histogram) failed on repetitive text
+/// because text has few adjacent equal bytes and many different character transitions,
+/// even when highly compressible by LZ77.
+///
+/// This new heuristic samples 4-byte sequences (what LZ77 actually matches on) and checks
+/// if we see repeated patterns. True high-entropy data (random bytes) will have very few
+/// repeated 4-grams, while compressible data (text, structured data) will have many.
 fn is_high_entropy_data(data: &[u8]) -> bool {
-    if data.len() < 1024 {
+    if data.len() < 4096 {
         return false;
     }
-    let mut equal_neighbors = 0usize;
-    let mut delta_hist = [0u32; 256];
-    let mut total_deltas = 0usize;
-    for w in data.windows(2) {
-        if w[0] == w[1] {
-            equal_neighbors += 1;
+
+    // Sample a portion of the data to avoid O(n) overhead on large inputs.
+    // Check first 8KB for repeated 4-byte sequences using a simple hash set approach.
+    let sample_len = data.len().min(8192);
+    let sample = &data[..sample_len];
+
+    // Use a simple hash table to count unique 4-grams
+    // If we see many repeated 4-grams, data is likely compressible
+    const HASH_SIZE: usize = 4096;
+    let mut seen = [false; HASH_SIZE];
+    let mut collisions = 0usize;
+
+    for window in sample.windows(4) {
+        let val = u32::from_le_bytes([window[0], window[1], window[2], window[3]]);
+        let hash = ((val.wrapping_mul(0x1E35_A7BD)) >> 20) as usize & (HASH_SIZE - 1);
+        
+        if seen[hash] {
+            collisions += 1;
+        } else {
+            seen[hash] = true;
         }
-        let delta = w[1].wrapping_sub(w[0]);
-        delta_hist[delta as usize] += 1;
-        total_deltas += 1;
     }
-    let ratio = equal_neighbors as f32 / (data.len().saturating_sub(1) as f32);
-    let max_delta = delta_hist.iter().copied().max().unwrap_or(0);
-    let max_delta_ratio = if total_deltas == 0 {
-        1.0
-    } else {
-        max_delta as f32 / total_deltas as f32
-    };
-    ratio < 0.01 && max_delta_ratio < 0.10
+
+    // For truly random data, we expect very few hash collisions in a 4K table
+    // when sampling 8K 4-grams (birthday paradox gives ~50% fill).
+    // Compressible data will have many repeated patterns causing high collision rate.
+    // 
+    // If collision rate is < 5%, data is likely random/incompressible.
+    // This threshold is conservative to avoid false positives on compressible data.
+    let total_4grams = sample_len.saturating_sub(3);
+    let collision_rate = collisions as f32 / total_4grams as f32;
+    
+    collision_rate < 0.05
 }
 
 /// Encode tokens using fixed Huffman codes.
