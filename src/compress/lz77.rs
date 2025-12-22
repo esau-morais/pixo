@@ -8,7 +8,7 @@ pub const MAX_DISTANCE: usize = 32768;
 
 /// Threshold for "good enough" match - skip lazy matching above this length.
 /// This is a common optimization used by zlib to speed up compression.
-const GOOD_MATCH_LENGTH: usize = 20;
+const GOOD_MATCH_LENGTH: usize = 16;
 
 /// Maximum match length (as per DEFLATE spec).
 pub const MAX_MATCH_LENGTH: usize = 258;
