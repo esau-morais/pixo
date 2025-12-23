@@ -24,6 +24,9 @@ pub struct PngOptions {
     pub compression_level: u8,
     /// Filter selection strategy.
     pub filter_strategy: FilterStrategy,
+    /// If true, zero out color channels for fully transparent pixels to improve compressibility.
+    /// Only applies to color types with alpha (RGBA, GrayAlpha).
+    pub optimize_alpha: bool,
 }
 
 impl Default for PngOptions {
@@ -33,6 +36,7 @@ impl Default for PngOptions {
             compression_level: 2,
             // AdaptiveFast reduces per-row work with minimal compression impact.
             filter_strategy: FilterStrategy::AdaptiveFast,
+            optimize_alpha: false,
         }
     }
 }
@@ -43,6 +47,7 @@ impl PngOptions {
         Self {
             compression_level: 2,
             filter_strategy: FilterStrategy::AdaptiveFast,
+            optimize_alpha: false,
         }
     }
 
@@ -51,6 +56,7 @@ impl PngOptions {
         Self {
             compression_level: 6,
             filter_strategy: FilterStrategy::Adaptive,
+            optimize_alpha: false,
         }
     }
 
@@ -59,6 +65,7 @@ impl PngOptions {
         Self {
             compression_level: 9,
             filter_strategy: FilterStrategy::AdaptiveSampled { interval: 2 },
+            optimize_alpha: false,
         }
     }
 }
@@ -176,7 +183,9 @@ pub fn encode_into(
     write_ihdr(output, width, height, color_type);
 
     // Apply filtering and compression
-    let filtered = filter::apply_filters(data, width, height, bytes_per_pixel, options);
+    let data = maybe_optimize_alpha(data, color_type, options.optimize_alpha);
+
+    let filtered = filter::apply_filters(&data, width, height, bytes_per_pixel, options);
     let compressed = deflate_zlib_packed(&filtered, options.compression_level);
 
     // Write IDAT chunk(s)
@@ -282,6 +291,47 @@ fn write_iend(output: &mut Vec<u8>) {
     chunk::write_chunk(output, b"IEND", &[]);
 }
 
+/// If enabled, zero color channels for fully transparent pixels to improve compression.
+fn maybe_optimize_alpha<'a>(
+    data: &'a [u8],
+    color_type: ColorType,
+    optimize_alpha: bool,
+) -> std::borrow::Cow<'a, [u8]> {
+    if !optimize_alpha {
+        return std::borrow::Cow::Borrowed(data);
+    }
+
+    let bytes_per_pixel = color_type.bytes_per_pixel();
+    if !matches!(color_type, ColorType::Rgba | ColorType::GrayAlpha) {
+        return std::borrow::Cow::Borrowed(data);
+    }
+
+    let mut out = data.to_owned();
+    match color_type {
+        ColorType::Rgba => {
+            for px in out.chunks_exact_mut(bytes_per_pixel) {
+                let alpha = px[3];
+                if alpha == 0 {
+                    px[0] = 0;
+                    px[1] = 0;
+                    px[2] = 0;
+                }
+            }
+        }
+        ColorType::GrayAlpha => {
+            for px in out.chunks_exact_mut(bytes_per_pixel) {
+                let alpha = px[1];
+                if alpha == 0 {
+                    px[0] = 0;
+                }
+            }
+        }
+        _ => {}
+    }
+
+    std::borrow::Cow::Owned(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,6 +404,20 @@ mod tests {
         );
         assert!(output.capacity() >= first_cap);
         assert_eq!(&output[0..8], &PNG_SIGNATURE);
+    }
+
+    #[test]
+    fn test_optimize_alpha_zeroes_color() {
+        let pixels = vec![
+            10, 20, 30, 0, // fully transparent, should zero RGB
+            1, 2, 3, 255, // opaque, should stay
+        ];
+        let out = maybe_optimize_alpha(&pixels, ColorType::Rgba, true);
+        assert_eq!(
+            &out[..],
+            &[0, 0, 0, 0, 1, 2, 3, 255],
+            "color channels should be zeroed when alpha is 0"
+        );
     }
 
     #[test]
