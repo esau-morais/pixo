@@ -556,6 +556,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 subsampling: args.subsampling.into(),
                 restart_interval: None,
             };
+            if args.verbose {
+                eprintln!(
+                    "JPEG options: quality={}, subsampling={:?}, restart_interval={:?}",
+                    options.quality, options.subsampling, options.restart_interval
+                );
+            }
             comprs::jpeg::encode_with_options_into(
                 &mut output_data,
                 &pixels,
