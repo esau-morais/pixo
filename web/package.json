@@ -7,7 +7,6 @@
 		"e2e:ui": "playwright test --ui",
 		"e2e:headed": "playwright test --headed",
 		"e2e:debug": "playwright test --debug",
-		"e2e:legacy": "node ./scripts/e2e-smoke.mjs",
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",

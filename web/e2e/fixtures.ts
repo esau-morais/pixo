@@ -5,21 +5,13 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-/**
- * Path to test fixtures
- */
 export const FIXTURES = {
 	PNG: join(__dirname, '..', '..', 'tests', 'fixtures', 'playground.png'),
 	JPEG: join(__dirname, '..', '..', 'tests', 'fixtures', 'multi-agent.jpg'),
 } as const;
 
-/**
- * Extended test with common utilities
- */
 export const test = base.extend<{
-	/** Wait for WASM to be fully initialized */
 	waitForWasm: () => Promise<void>;
-	/** Upload file(s) and wait for processing to complete */
 	uploadAndWaitForCompression: (filePaths: string | string[]) => Promise<void>;
 }>({
 	waitForWasm: async ({ page }, use) => {
@@ -51,9 +43,6 @@ export const test = base.extend<{
 
 export { expect };
 
-/**
- * Helper to parse bytes from formatted string (e.g., "123 KB" -> 123000)
- */
 export function parseFormattedBytes(formatted: string): number {
 	const match = formatted.match(/^([\d.]+)\s*(B|KB|MB|GB)$/);
 	if (!match) return 0;
