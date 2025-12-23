@@ -61,6 +61,18 @@ struct Args {
     )]
     adaptive_sample_interval: u32,
 
+    /// Optimize fully transparent pixels by zeroing color channels (PNG)
+    #[arg(long, default_value_t = false)]
+    png_optimize_alpha: bool,
+
+    /// Reduce color type when lossless-safe (e.g., RGBA→RGB/GrayAlpha, RGB→Gray)
+    #[arg(long, default_value_t = false)]
+    png_reduce_color: bool,
+
+    /// Strip non-critical metadata (tEXt/zTXt/iTXt/tIME) from PNG output
+    #[arg(long, default_value_t = false)]
+    png_strip_metadata: bool,
+
     /// Convert to grayscale
     #[arg(long)]
     grayscale: bool,
@@ -109,6 +121,8 @@ enum FilterArg {
     Average,
     /// Paeth filter
     Paeth,
+    /// Entropy-scored filter selection (more compression, slower)
+    Entropy,
     /// Adaptive filter selection (best compression)
     Adaptive,
     /// Adaptive with reduced trials and early cutoffs (faster)
@@ -135,6 +149,7 @@ impl FilterArg {
             FilterArg::Up => FilterStrategy::Up,
             FilterArg::Average => FilterStrategy::Average,
             FilterArg::Paeth => FilterStrategy::Paeth,
+            FilterArg::Entropy => FilterStrategy::Entropy,
             FilterArg::Adaptive => FilterStrategy::Adaptive,
             FilterArg::AdaptiveFast => FilterStrategy::AdaptiveFast,
             FilterArg::AdaptiveSampled => FilterStrategy::AdaptiveSampled {
@@ -464,11 +479,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 None => PngOptions {
                     compression_level: args.compression,
                     filter_strategy: args.filter.to_strategy(args.adaptive_sample_interval),
+                    optimize_alpha: args.png_optimize_alpha,
+                    reduce_color_type: args.png_reduce_color,
+                    strip_metadata: args.png_strip_metadata,
                 },
             };
             // Allow explicit overrides if preset is provided but user also set flags.
             options.compression_level = args.compression;
             options.filter_strategy = args.filter.to_strategy(args.adaptive_sample_interval);
+            options.optimize_alpha = args.png_optimize_alpha;
+            options.reduce_color_type = args.png_reduce_color;
+            options.strip_metadata = args.png_strip_metadata;
 
             comprs::png::encode_into(
                 &mut output_data,
