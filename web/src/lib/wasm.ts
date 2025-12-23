@@ -17,6 +17,7 @@ export type CompressOptions = {
 	compressionLevel?: number; // PNG compression level 1-9
 	filter?: PngFilter;
 	subsampling420?: boolean;
+	hasAlpha?: boolean; // If false, strip alpha channel for smaller output
 };
 
 export type CompressResult = {
@@ -66,8 +67,18 @@ export async function compressImage(imageData: ImageData, options: CompressOptio
 	if (options.format === 'png') {
 		const compressionLevel = clamp(options.compressionLevel ?? 6, 1, 9);
 		const filterCode = filterMap[options.filter ?? 'adaptive'];
-		const rgba = new Uint8Array(imageData.data);
-		bytes = encodePngWithFilter(rgba, imageData.width, imageData.height, 3, compressionLevel, filterCode);
+
+		// If the image has no meaningful alpha, encode as RGB (color_type 2) for smaller output
+		// This avoids the overhead of encoding an all-255 alpha channel
+		const useRgb = options.hasAlpha === false;
+
+		if (useRgb) {
+			const rgb = rgbaToRgb(imageData.data);
+			bytes = encodePngWithFilter(rgb, imageData.width, imageData.height, 2, compressionLevel, filterCode);
+		} else {
+			const rgba = new Uint8Array(imageData.data);
+			bytes = encodePngWithFilter(rgba, imageData.width, imageData.height, 3, compressionLevel, filterCode);
+		}
 		mime = 'image/png';
 	} else {
 		const quality = clamp(options.quality ?? 85, 1, 100);

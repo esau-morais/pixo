@@ -515,3 +515,57 @@ fn test_png_compression_regression_rocket() {
         encoded_l6.len()
     );
 }
+
+/// Test RGBA encoding of the rocket image (simulates web app behavior).
+///
+/// The web app receives RGBA data from canvas ImageData, so we need to ensure
+/// RGBA encoding also produces reasonable output sizes.
+#[test]
+fn test_png_compression_regression_rocket_rgba() {
+    let fixture_path = std::path::Path::new("tests/fixtures/rocket.png");
+    if !fixture_path.exists() {
+        eprintln!("Skipping rocket RGBA regression test: fixture not found");
+        return;
+    }
+
+    let original_bytes = std::fs::read(fixture_path).expect("read fixture");
+    let original_size = original_bytes.len();
+
+    // Decode to RGBA (like the web app does via canvas ImageData)
+    let img = image::open(fixture_path).expect("open fixture");
+    let img_rgba = img.to_rgba8();
+    let width = img_rgba.width();
+    let height = img_rgba.height();
+    let rgba_pixels = img_rgba.as_raw();
+
+    eprintln!("Original PNG size: {} bytes", original_size);
+    eprintln!("Image dimensions: {}x{}", width, height);
+    eprintln!("RGBA raw size: {} bytes", rgba_pixels.len());
+
+    // Test with level 6 adaptive (what web app uses by default)
+    let options = png::PngOptions {
+        compression_level: 6,
+        filter_strategy: png::FilterStrategy::Adaptive,
+    };
+
+    let encoded_rgba =
+        png::encode_with_options(rgba_pixels, width, height, ColorType::Rgba, &options)
+            .expect("encode rgba");
+
+    let rgba_ratio = encoded_rgba.len() as f64 / original_size as f64;
+    eprintln!(
+        "RGBA output size: {} bytes ({:.1}% vs original)",
+        encoded_rgba.len(),
+        (rgba_ratio - 1.0) * 100.0
+    );
+
+    // For RGBA, we expect overhead due to the extra alpha channel.
+    // Even though the alpha is all 255, it adds ~33% more data per row to filter/compress.
+    // Allow up to 20% larger since we're adding a 4th channel to an originally RGB image.
+    // Note: The web app should detect hasAlpha=false and encode as RGB instead.
+    assert!(
+        rgba_ratio < 1.20,
+        "RGBA Compression regression: output is {:.1}% larger than original (expected < 20%)",
+        (rgba_ratio - 1.0) * 100.0
+    );
+}

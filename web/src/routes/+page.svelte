@@ -235,6 +235,7 @@
       const { blob, elapsedMs } = await compressImage(job.imageData, {
         ...globalOptions,
         format: jobFormat,
+        hasAlpha: job.hasAlpha,
       });
       const url = URL.createObjectURL(blob);
       if (job.result?.url) URL.revokeObjectURL(job.result.url);
