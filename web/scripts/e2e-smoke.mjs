@@ -15,8 +15,9 @@ async function run() {
 	await page.goto(baseUrl, { waitUntil: 'networkidle' });
 	await page.setInputFiles('input[type=file]', fixturePath);
 	await page.waitForSelector('text=playground.png', { timeout: 10000 });
-	await page.getByRole('button', { name: 'Compress now' }).click();
-	await page.waitForSelector('text=Download', { timeout: 20000 });
+	// Compression happens automatically when files are added
+	// Wait for the Download button to appear (indicates compression is complete)
+	await page.waitForSelector('text=Download', { timeout: 30000 });
 	await page.screenshot({ path: 'playwright-screenshot.png', fullPage: true });
 
 	await browser.close();
