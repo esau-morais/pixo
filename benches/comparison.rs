@@ -38,6 +38,7 @@ fn generate_gradient_image(width: u32, height: u32) -> Vec<u8> {
     pixels
 }
 
+#[allow(dead_code)]
 fn generate_noisy_image(width: u32, height: u32) -> Vec<u8> {
     let mut pixels = Vec::with_capacity((width * height * 3) as usize);
     let mut seed = 12345u32;
@@ -132,7 +133,7 @@ fn encode_with_oxipng(pixels: &[u8], width: u32, height: u32, tmp_dir: &Path) ->
 /// Write PPM file for mozjpeg input
 fn write_ppm(path: &Path, pixels: &[u8], width: u32, height: u32) -> std::io::Result<()> {
     let mut file = fs::File::create(path)?;
-    writeln!(file, "P6\n{} {}\n255", width, height)?;
+    writeln!(file, "P6\n{width} {height}\n255")?;
     file.write_all(pixels)?;
     Ok(())
 }

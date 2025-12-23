@@ -127,6 +127,7 @@ pub fn encode_dc_refine(writer: &mut BitWriterMsb, dc_coef: i16, al: u8) {
 }
 
 /// Encode AC coefficients for first progressive scan.
+#[allow(clippy::too_many_arguments)]
 pub fn encode_ac_first(
     writer: &mut BitWriterMsb,
     block: &[i16; 64],
@@ -202,6 +203,7 @@ pub fn encode_ac_first(
 }
 
 /// Encode AC coefficient refinement scan.
+#[allow(clippy::too_many_arguments)]
 pub fn encode_ac_refine(
     writer: &mut BitWriterMsb,
     block: &[i16; 64],

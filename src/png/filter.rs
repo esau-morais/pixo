@@ -175,10 +175,8 @@ pub fn apply_filters(
         // Update previous row reference
         prev_row = row;
 
-        if options.verbose_filter_log {
-            if last_filter <= FILTER_PAETH {
-                filter_counts[last_filter as usize] += 1;
-            }
+        if options.verbose_filter_log && last_filter <= FILTER_PAETH {
+            filter_counts[last_filter as usize] += 1;
         }
     }
 

@@ -485,7 +485,7 @@ fn maybe_reduce_color_type<'a>(
             } else {
                 indexed
             };
-            let bytes_per_pixel = ((bit_depth as usize + 7) / 8).max(1);
+            let bytes_per_pixel = (bit_depth as usize).div_ceil(8).max(1);
             return ReducedImage {
                 data: std::borrow::Cow::Owned(packed),
                 effective_color_type: ColorType::Rgb, // For optimize_alpha logic (unused for palette)
@@ -521,7 +521,7 @@ fn maybe_reduce_color_type<'a>(
                 } else {
                     gray
                 };
-                let bytes_per_pixel = ((bit_depth as usize + 7) / 8).max(1);
+                let bytes_per_pixel = (bit_depth as usize).div_ceil(8).max(1);
                 ReducedImage {
                     data: std::borrow::Cow::Owned(packed),
                     effective_color_type: ColorType::Gray,
@@ -554,7 +554,7 @@ fn maybe_reduce_color_type<'a>(
                 } else {
                     gray
                 };
-                let bytes_per_pixel = ((bit_depth as usize + 7) / 8).max(1);
+                let bytes_per_pixel = (bit_depth as usize).div_ceil(8).max(1);
                 ReducedImage {
                     data: std::borrow::Cow::Owned(packed),
                     effective_color_type: ColorType::Gray,

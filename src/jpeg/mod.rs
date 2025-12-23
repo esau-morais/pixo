@@ -250,18 +250,15 @@ pub fn encode_with_options_into(
     // Create quantization and Huffman tables
     let quant_tables = QuantizationTables::with_quality(options.quality);
     let huff_tables = if options.optimize_huffman {
-        if let Some(opt) = build_optimized_huffman_tables(
+        build_optimized_huffman_tables(
             data,
             width,
             height,
             color_type,
             options.subsampling,
             &quant_tables,
-        ) {
-            opt
-        } else {
-            HuffmanTables::default()
-        }
+        )
+        .unwrap_or_default()
     } else {
         HuffmanTables::default()
     };
@@ -668,7 +665,7 @@ fn build_optimized_huffman_tables(
 fn count_block(
     block: &[i16; 64],
     prev_dc: i16,
-    is_luminance: bool,
+    _is_luminance: bool,
     dc_counts: &mut [u64; 12],
     ac_counts: &mut [u64; 256],
 ) -> i16 {
@@ -698,11 +695,7 @@ fn count_block(
     }
 
     // Return current DC for next differential block
-    if is_luminance {
-        dc
-    } else {
-        dc
-    }
+    dc
 }
 
 #[inline]
@@ -1087,7 +1080,7 @@ fn encode_scan(
                           mcu_count: u32,
                           rst_idx: &mut u8| {
         if let Some(interval) = restart_interval {
-            if interval > 0 && mcu_count % interval as u32 == 0 {
+            if interval > 0 && mcu_count.is_multiple_of(interval as u32) {
                 writer.flush();
                 writer.write_bytes(&[0xFF, 0xD0 + (*rst_idx & 0x07)]);
                 *rst_idx = (*rst_idx + 1) & 0x07;

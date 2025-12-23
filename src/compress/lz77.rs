@@ -919,7 +919,7 @@ fn distance_to_symbol(distance: u16) -> (u16, u8) {
     debug_assert!((1..=32768).contains(&distance), "Invalid distance");
 
     if distance < 5 {
-        return (distance as u16 - 1, 0);
+        return (distance - 1, 0);
     }
 
     // For larger distances, use bit manipulation

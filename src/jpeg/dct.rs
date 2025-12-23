@@ -502,7 +502,7 @@ mod tests {
 
         // AC components should be zero or very small for a constant block
         for (i, &val) in result.iter().enumerate().skip(1) {
-            assert!(val.abs() <= 1, "AC component at {} too large: {}", i, val);
+            assert!(val.abs() <= 1, "AC component at {i} too large: {val}");
         }
     }
 
@@ -538,9 +538,7 @@ mod tests {
 
         assert!(
             low_freq_energy > high_freq_energy,
-            "Low freq energy {} should exceed high freq energy {}",
-            low_freq_energy,
-            high_freq_energy
+            "Low freq energy {low_freq_energy} should exceed high freq energy {high_freq_energy}"
         );
     }
 

@@ -639,10 +639,11 @@ fn find_block_splits(tokens: &[Token], max_blocks: usize) -> Vec<usize> {
             let end = block_boundaries[i + 1];
             let size = end - start;
 
-            if !done[start] && size >= MIN_BLOCK_SIZE * 2 {
-                if largest_block.map_or(true, |(_, _, s)| size > s) {
-                    largest_block = Some((start, end, size));
-                }
+            if !done[start]
+                && size >= MIN_BLOCK_SIZE * 2
+                && largest_block.is_none_or(|(_, _, s)| size > s)
+            {
+                largest_block = Some((start, end, size));
             }
         }
 

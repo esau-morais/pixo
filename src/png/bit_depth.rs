@@ -69,7 +69,7 @@ pub fn pack_indexed(data: &[u8], bit_depth: u8) -> Vec<u8> {
 }
 
 pub fn pack_bits(data: &[u8], bits: u8) -> Vec<u8> {
-    let mut out = Vec::with_capacity((data.len() * bits as usize + 7) / 8);
+    let mut out = Vec::with_capacity((data.len() * bits as usize).div_ceil(8));
     let mut acc: u8 = 0;
     let mut acc_bits = 0;
     let mask = (1u8 << bits) - 1;

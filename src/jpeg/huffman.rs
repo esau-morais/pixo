@@ -131,6 +131,7 @@ impl HuffmanTables {
     }
 
     /// Create Huffman tables from per-symbol code lengths (bits/vals).
+    #[allow(clippy::too_many_arguments)]
     fn from_bits_vals(
         dc_lum_bits: [u8; 16],
         dc_lum_vals: Vec<u8>,

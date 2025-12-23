@@ -359,13 +359,13 @@ fn print_size_comparison() {
 
         let gap_str = if let Some(moz_size) = mozjpeg_size {
             let gap = (max_buf.len() as f64 / moz_size as f64 - 1.0) * 100.0;
-            format!("{:+.1}%", gap)
+            format!("{gap:+.1}%")
         } else {
             "N/A".to_string()
         };
 
         let moz_str = mozjpeg_size
-            .map(|s| format_size(s))
+            .map(format_size)
             .unwrap_or_else(|| "N/A".to_string());
 
         println!(
@@ -417,7 +417,7 @@ fn print_size_comparison() {
 
         let speedup = fast_time.as_secs_f64() / max_time.as_secs_f64();
         let notes = if speedup > 1.5 {
-            format!("fast {:.1}x faster", speedup)
+            format!("fast {speedup:.1}x faster")
         } else {
             "similar speed".to_string()
         };
@@ -451,11 +451,11 @@ fn encode_with_mozjpeg(
     name: &str,
 ) -> Option<usize> {
     // Write PPM file for mozjpeg input
-    let ppm_path = tmp_dir.join(format!("{}.ppm", name));
-    let jpg_path = tmp_dir.join(format!("{}.mozjpeg.jpg", name));
+    let ppm_path = tmp_dir.join(format!("{name}.ppm"));
+    let jpg_path = tmp_dir.join(format!("{name}.mozjpeg.jpg"));
 
     let mut file = fs::File::create(&ppm_path).ok()?;
-    writeln!(file, "P6\n{} {}\n255", width, height).ok()?;
+    writeln!(file, "P6\n{width} {height}\n255").ok()?;
     file.write_all(pixels).ok()?;
     drop(file);
 
@@ -510,7 +510,7 @@ fn format_size(bytes: usize) -> String {
     } else if bytes >= 1024 {
         format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     }
 }
 
@@ -519,7 +519,7 @@ fn format_duration(duration: Duration) -> String {
     if micros >= 1000 {
         format!("{:.2} ms", duration.as_secs_f64() * 1000.0)
     } else {
-        format!("{} µs", micros)
+        format!("{micros} µs")
     }
 }
 

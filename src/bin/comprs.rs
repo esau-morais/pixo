@@ -481,6 +481,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     strip_metadata: args.png_strip_metadata,
                     reduce_palette: args.png_reduce_color,
                     verbose_filter_log: args.verbose,
+                    optimal_compression: false,
                 },
             };
             // Allow explicit overrides if preset is provided but user also set flags.
