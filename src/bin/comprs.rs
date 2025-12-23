@@ -147,6 +147,20 @@ enum PngPresetArg {
     Balanced,
     /// Maximum compression (level 9, AdaptiveSampled interval=2)
     Max,
+    /// Oxipng-like level 0
+    Level0,
+    /// Oxipng-like level 1
+    Level1,
+    /// Oxipng-like level 2
+    Level2,
+    /// Oxipng-like level 3
+    Level3,
+    /// Oxipng-like level 4
+    Level4,
+    /// Oxipng-like level 5
+    Level5,
+    /// Oxipng-like level 6
+    Level6,
 }
 
 impl FilterArg {
@@ -488,6 +502,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Some(PngPresetArg::Fast) => PngOptions::fast(),
                 Some(PngPresetArg::Balanced) => PngOptions::balanced(),
                 Some(PngPresetArg::Max) => PngOptions::max_compression(),
+                Some(PngPresetArg::Level0) => PngOptions::oxipng_preset(0).unwrap(),
+                Some(PngPresetArg::Level1) => PngOptions::oxipng_preset(1).unwrap(),
+                Some(PngPresetArg::Level2) => PngOptions::oxipng_preset(2).unwrap(),
+                Some(PngPresetArg::Level3) => PngOptions::oxipng_preset(3).unwrap(),
+                Some(PngPresetArg::Level4) => PngOptions::oxipng_preset(4).unwrap(),
+                Some(PngPresetArg::Level5) => PngOptions::oxipng_preset(5).unwrap(),
+                Some(PngPresetArg::Level6) => PngOptions::oxipng_preset(6).unwrap(),
                 None => PngOptions {
                     compression_level: args.compression,
                     filter_strategy: args.filter.to_strategy(args.adaptive_sample_interval),

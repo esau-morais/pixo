@@ -56,6 +56,30 @@ impl Default for PngOptions {
 }
 
 impl PngOptions {
+    /// oxipng-inspired preset by level (0-6).
+    pub fn oxipng_preset(level: u8) -> Option<Self> {
+        let base = match level {
+            0 => (1, FilterStrategy::None),
+            1 => (2, FilterStrategy::Sub),
+            2 => (4, FilterStrategy::AdaptiveFast),
+            3 => (6, FilterStrategy::MinSum),
+            4 => (7, FilterStrategy::Bigrams),
+            5 => (8, FilterStrategy::BigEnt),
+            6 => (9, FilterStrategy::Brute),
+            _ => return None,
+        };
+        Some(Self {
+            compression_level: base.0,
+            filter_strategy: base.1,
+            // oxipng presets enable these reductions/optimizations by default.
+            optimize_alpha: true,
+            reduce_color_type: true,
+            strip_metadata: true,
+            reduce_palette: true,
+            verbose_filter_log: false,
+        })
+    }
+
     /// Speed-focused preset (matches current default).
     pub fn fast() -> Self {
         Self {
@@ -883,6 +907,27 @@ mod tests {
         // Bit depth should reflect palette size (2 colors -> 1 bit)
         assert_eq!(png[24], 1);
         assert!(png.windows(4).any(|w| w == b"PLTE"));
+    }
+
+    #[test]
+    fn test_oxipng_presets() {
+        // Ensure mapping exists and sets expected strategies/flags.
+        let presets: Vec<_> = (0u8..=6)
+            .filter_map(|lvl| PngOptions::oxipng_preset(lvl).map(|p| (lvl, p)))
+            .collect();
+        assert_eq!(presets.len(), 7);
+        // Check a few representative levels
+        let (_, ref p0) = presets[0];
+        assert_eq!(p0.filter_strategy, FilterStrategy::None);
+        assert!(
+            p0.optimize_alpha && p0.reduce_color_type && p0.reduce_palette && p0.strip_metadata
+        );
+        let (_, ref p3) = presets[3];
+        assert_eq!(p3.filter_strategy, FilterStrategy::MinSum);
+        assert_eq!(p3.compression_level, 6);
+        let (_, ref p6) = presets[6];
+        assert_eq!(p6.filter_strategy, FilterStrategy::Brute);
+        assert_eq!(p6.compression_level, 9);
     }
 
     #[test]
