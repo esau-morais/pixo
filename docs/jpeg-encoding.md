@@ -267,12 +267,22 @@ while zero_run >= 16 {
 
 ## Stage 8: Huffman Encoding
 
-Finally, the run/value pairs are Huffman encoded using standard tables:
+Finally, the run/value pairs are Huffman encoded using Huffman tables. By default we use the standard JPEG tables; with the new `optimize_huffman` option, we build per-image tables from coefficient frequencies (mozjpeg-style `optimize_coding`) and fall back to the standard tables if code lengths would exceed 16 bits.
 
 - **DC tables**: Encode the category (number of bits needed for the difference)
 - **AC tables**: Encode the (run, size) byte
 
 JPEG uses separate tables for luminance (Y) and chrominance (Cb, Cr) to optimize for their different statistics.
+
+### Optimized Huffman tables
+
+When `optimize_huffman` is enabled in `JpegOptions`, we:
+
+1. Run a counting pass over quantized coefficients (DC/AC, per component).
+2. Build canonical code lengths from symbol frequencies.
+3. Emit DHT segments derived from those lengths.
+
+If any code length would exceed the JPEG limit (16 bits) or counts are empty, we silently fall back to the standard tables. This improves compression at the cost of an extra pass over coefficients and slightly slower encode time.
 
 ```rust
 // From src/jpeg/huffman.rs

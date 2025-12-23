@@ -149,6 +149,7 @@ comprs input.png -o output.jpg -v
 | `-o, --output`      | Output file path                                                 | `<input>.compressed.<ext>` |
 | `-f, --format`      | Output format (`png`, `jpeg`, `jpg`)                             | Detected from extension    |
 | `-q, --quality`     | JPEG quality (1-100)                                             | 85                         |
+| `--jpeg-optimize-huffman` | Optimize JPEG Huffman tables per image (smaller files, slower) | false                      |
 | `-c, --compression` | PNG compression level (1-9)                                      | 6                          |
 | `--subsampling`     | JPEG chroma subsampling (`s444`, `s420`)                         | s444                       |
 | `--filter`          | PNG filter (`none`, `sub`, `up`, `average`, `paeth`, `minsum`, `entropy`, `bigrams`, `bigent`, `brute`, `adaptive`, `adaptive-fast`, `adaptive-sampled`) | adaptive                   |
