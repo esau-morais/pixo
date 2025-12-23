@@ -15,6 +15,7 @@ export type CompressOptions = {
 	filter?: PngFilter;
 	subsampling420?: boolean;
 	hasAlpha?: boolean; // If false, strip alpha channel for smaller output
+	optimizeHuffman?: boolean; // JPEG: optimize Huffman tables (smaller, slower)
 };
 
 export type CompressResult = {
@@ -86,7 +87,15 @@ export async function compressImage(imageData: ImageData, options: CompressOptio
 	} else {
 		const quality = clamp(options.quality ?? 85, 1, 100);
 		const rgb = rgbaToRgb(imageData.data);
-		bytes = wasmModule.encodeJpeg(rgb, imageData.width, imageData.height, quality, 2, options.subsampling420 ?? true);
+		const optimize = options.optimizeHuffman ?? false;
+		const encoderWithOpts = (wasmModule as any).encodeJpegWithOptions as
+			| undefined
+			| ((d: Uint8Array, w: number, h: number, q: number, ct: number, subs420: boolean, opt: boolean) => Uint8Array);
+		if (encoderWithOpts) {
+			bytes = encoderWithOpts(rgb, imageData.width, imageData.height, quality, 2, options.subsampling420 ?? true, optimize);
+		} else {
+			bytes = wasmModule.encodeJpeg(rgb, imageData.width, imageData.height, quality, 2, options.subsampling420 ?? true);
+		}
 		mime = 'image/jpeg';
 	}
 
