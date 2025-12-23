@@ -528,6 +528,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             options.reduce_palette = args.png_reduce_color;
             options.verbose_filter_log = args.verbose;
 
+            if args.verbose {
+                eprintln!(
+                    "PNG options: preset={:?}, level={}, filter={:?}, optimize_alpha={}, reduce_color_type={}, reduce_palette={}, strip_metadata={}",
+                    args.png_preset.unwrap_or(PngPresetArg::Fast),
+                    options.compression_level,
+                    options.filter_strategy,
+                    options.optimize_alpha,
+                    options.reduce_color_type,
+                    options.reduce_palette,
+                    options.strip_metadata
+                );
+            }
+
             comprs::png::encode_into(
                 &mut output_data,
                 &pixels,
