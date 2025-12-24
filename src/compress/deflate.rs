@@ -2230,6 +2230,24 @@ mod tests {
     }
 
     #[test]
+    fn test_dynamic_huffman_single_literal_roundtrip() {
+        use flate2::read::DeflateDecoder;
+        use std::io::Read;
+
+        // Minimal stream: single literal + EOB, exercises HLIT/HDIST trimming.
+        let tokens = vec![Token::Literal(b'X')];
+        let encoded = encode_dynamic_huffman(&tokens);
+
+        let mut decoder = DeflateDecoder::new(&encoded[..]);
+        let mut decoded = Vec::new();
+        decoder
+            .read_to_end(&mut decoded)
+            .expect("decode single-literal dynamic stream");
+
+        assert_eq!(decoded, b"X");
+    }
+
+    #[test]
     fn test_deflate_optimal_empty() {
         let compressed = deflate_optimal(&[], 3);
         assert!(!compressed.is_empty());
