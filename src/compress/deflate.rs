@@ -2248,6 +2248,27 @@ mod tests {
     }
 
     #[test]
+    fn test_dynamic_huffman_all_literals_roundtrip() {
+        use flate2::read::DeflateDecoder;
+        use std::io::Read;
+
+        // All-literal stream: exercises HLIT/HDIST trimming and the forced
+        // distance count=1 path.
+        let data: Vec<u8> = (0u8..50).collect();
+        let tokens: Vec<Token> = data.iter().copied().map(Token::Literal).collect();
+
+        let encoded = encode_dynamic_huffman(&tokens);
+
+        let mut decoder = DeflateDecoder::new(&encoded[..]);
+        let mut decoded = Vec::new();
+        decoder
+            .read_to_end(&mut decoded)
+            .expect("decode all-literal dynamic stream");
+
+        assert_eq!(decoded, data, "all-literal dynamic roundtrip failed");
+    }
+
+    #[test]
     fn test_deflate_optimal_empty() {
         let compressed = deflate_optimal(&[], 3);
         assert!(!compressed.is_empty());
