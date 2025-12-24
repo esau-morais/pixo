@@ -858,6 +858,10 @@ These optimization patterns are applied throughout comprs. To see them in action
 - **Fast DCT algorithm**: `src/jpeg/dct.rs`
 - **Batch bit operations**: `src/bits.rs`
 
+## Next Steps
+
+Continue to [Compression Evolution](./compression-evolution.md) to explore the history and philosophy behind modern compression techniques.
+
 ---
 
 ## References
