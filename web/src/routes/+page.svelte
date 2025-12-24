@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { compressImage, initWasm, type PngFilter, type PresetLevel } from "$lib/wasm";
+  import { compressImage, initWasm, type PresetLevel } from "$lib/wasm";
   import { onDestroy, onMount } from "svelte";
   import JSZip from "jszip";
 
@@ -39,8 +39,6 @@
 
   let globalOptions = $state({
     quality: 85,
-    compressionLevel: 6,
-    filter: "adaptive" as PngFilter,
     subsampling420: true,
     pngPreset: 1 as PresetLevel, // 0=faster, 1=auto, 2=smallest
     pngLossless: false, // Default OFF = lossy enabled for smaller PNGs
