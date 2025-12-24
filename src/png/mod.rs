@@ -505,11 +505,11 @@ fn write_iend(output: &mut Vec<u8>) {
 }
 
 /// If enabled, zero color channels for fully transparent pixels to improve compression.
-fn maybe_optimize_alpha<'a>(
-    data: &'a [u8],
+fn maybe_optimize_alpha(
+    data: &[u8],
     color_type: ColorType,
     optimize_alpha: bool,
-) -> std::borrow::Cow<'a, [u8]> {
+) -> std::borrow::Cow<'_, [u8]> {
     if !optimize_alpha {
         return std::borrow::Cow::Borrowed(data);
     }
