@@ -2398,4 +2398,49 @@ mod tests {
             "color type should be palette (3) after quantization"
         );
     }
+
+    #[test]
+    fn test_quantization_force_rgba_produces_trns_palette() {
+        // RGBA quantization should emit palette + tRNS when alpha varies.
+        // Two pixels: one fully transparent red, one opaque green.
+        let data = vec![
+            255, 0, 0, 0, // transparent red
+            0, 255, 0, 255, // opaque green
+        ];
+        let mut options = PngOptions::default();
+        options.quantization = QuantizationOptions {
+            mode: QuantizationMode::Force,
+            max_colors: 256,
+            dithering: false,
+        };
+
+        let png = encode_with_options(&data, 2, 1, ColorType::Rgba, &options).unwrap();
+
+        // Color type should be palette (3) and bit depth 8
+        assert_eq!(png[25], 3, "color type should be palette (3)");
+        assert_eq!(png[24], 8, "bit depth should remain 8 for palette output");
+
+        // Find PLTE and tRNS chunks
+        fn find_chunk(data: &[u8], name: &[u8; 4]) -> Option<(usize, usize)> {
+            let mut offset = 8;
+            while offset + 8 <= data.len() {
+                let len = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+                let chunk_type = &data[offset + 4..offset + 8];
+                if chunk_type == name {
+                    return Some((offset, len));
+                }
+                offset += 12 + len;
+            }
+            None
+        }
+
+        let (_, plte_len) = find_chunk(&png, b"PLTE").expect("PLTE missing");
+        assert_eq!(plte_len, 6, "expected 2 palette entries (6 bytes)");
+
+        let (_, trns_len) = find_chunk(&png, b"tRNS").expect("tRNS missing");
+        assert!(
+            trns_len <= 2 && trns_len >= 1,
+            "tRNS length should be 1..=2, got {trns_len}"
+        );
+    }
 }
