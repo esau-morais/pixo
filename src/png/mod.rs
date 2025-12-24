@@ -251,6 +251,16 @@ impl PngOptionsBuilder {
         self
     }
 
+    /// Convenience to toggle lossy (Auto quantization) vs. lossless (Off).
+    pub fn lossy(mut self, lossy: bool) -> Self {
+        self.options.quantization.mode = if lossy {
+            QuantizationMode::Auto
+        } else {
+            QuantizationMode::Off
+        };
+        self
+    }
+
     pub fn quantization_max_colors(mut self, max_colors: u16) -> Self {
         self.options.quantization.max_colors = max_colors;
         self
@@ -2044,6 +2054,15 @@ mod tests {
         assert!(!opts.strip_metadata);
         assert!(!opts.reduce_palette);
         assert_eq!(opts.quantization.mode, QuantizationMode::Off);
+    }
+
+    #[test]
+    fn test_builder_lossy_toggle() {
+        let lossy = PngOptions::builder().lossy(true).build();
+        assert_eq!(lossy.quantization.mode, QuantizationMode::Auto);
+
+        let lossless = PngOptions::builder().lossy(false).build();
+        assert_eq!(lossless.quantization.mode, QuantizationMode::Off);
     }
 
     #[test]

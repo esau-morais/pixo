@@ -77,14 +77,7 @@ pub fn encode_png(
 ) -> Result<Vec<u8>, JsError> {
     let color = color_type_from_u8(color_type)?;
     // lossy=true means we want quantization, which is lossless=false internally
-    let options = PngOptions::builder()
-        .preset(preset)
-        .quantization_mode(if lossy {
-            png::QuantizationMode::Auto
-        } else {
-            png::QuantizationMode::Off
-        })
-        .build();
+    let options = PngOptions::builder().preset(preset).lossy(lossy).build();
     png::encode_with_options(data, width, height, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }
