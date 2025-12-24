@@ -36,6 +36,7 @@ const DISTANCE_EXTRA: [u8; 30] = [
 
 /// Timing and accounting information for a single DEFLATE encode.
 #[derive(Debug, Clone)]
+#[must_use]
 pub struct DeflateStats {
     /// Time spent in LZ77 match finding/tokenization.
     pub lz77_time: Duration,

@@ -88,6 +88,7 @@ impl Crc32 {
 
     /// Finalize and return the CRC value.
     #[inline]
+    #[must_use]
     pub fn finalize(self) -> u32 {
         self.crc ^ 0xFFFFFFFF
     }
