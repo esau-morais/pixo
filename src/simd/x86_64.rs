@@ -526,12 +526,27 @@ unsafe fn paeth_predict_128(left: __m128i, above: __m128i, upper_left: __m128i) 
     let pb_hi = abs_epi16_sse2(_mm_sub_epi16(p_hi, b_hi));
     let pc_hi = abs_epi16_sse2(_mm_sub_epi16(p_hi, c_hi));
 
-    let mask_a_lo = _mm_and_si128(_mm_cmpgt_epi16(pb_lo, pa_lo), _mm_cmpgt_epi16(pc_lo, pa_lo));
-    let mask_b_lo = _mm_and_si128(_mm_cmpgt_epi16(pa_lo, pb_lo), _mm_cmpgt_epi16(pc_lo, pb_lo));
+    // PNG Paeth: choose a if pa <= pb && pa <= pc; else if pb <= pc choose b; else c
+    // SSE2 has cmpgt but not cmple, so we use: (a <= b) = NOT(a > b)
+    // mask_a = (pa <= pb) && (pa <= pc) = NOT(pa > pb) && NOT(pa > pc)
+    let pa_le_pb_lo = _mm_andnot_si128(_mm_cmpgt_epi16(pa_lo, pb_lo), _mm_set1_epi16(-1));
+    let pa_le_pc_lo = _mm_andnot_si128(_mm_cmpgt_epi16(pa_lo, pc_lo), _mm_set1_epi16(-1));
+    let mask_a_lo = _mm_and_si128(pa_le_pb_lo, pa_le_pc_lo);
+
+    // mask_b = NOT(mask_a) && (pb <= pc)
+    let pb_le_pc_lo = _mm_andnot_si128(_mm_cmpgt_epi16(pb_lo, pc_lo), _mm_set1_epi16(-1));
+    let mask_b_lo = _mm_andnot_si128(mask_a_lo, pb_le_pc_lo);
+
+    // mask_c = NOT(mask_a) && NOT(mask_b)
     let mask_c_lo = _mm_andnot_si128(_mm_or_si128(mask_a_lo, mask_b_lo), _mm_set1_epi16(-1));
 
-    let mask_a_hi = _mm_and_si128(_mm_cmpgt_epi16(pb_hi, pa_hi), _mm_cmpgt_epi16(pc_hi, pa_hi));
-    let mask_b_hi = _mm_and_si128(_mm_cmpgt_epi16(pa_hi, pb_hi), _mm_cmpgt_epi16(pc_hi, pb_hi));
+    let pa_le_pb_hi = _mm_andnot_si128(_mm_cmpgt_epi16(pa_hi, pb_hi), _mm_set1_epi16(-1));
+    let pa_le_pc_hi = _mm_andnot_si128(_mm_cmpgt_epi16(pa_hi, pc_hi), _mm_set1_epi16(-1));
+    let mask_a_hi = _mm_and_si128(pa_le_pb_hi, pa_le_pc_hi);
+
+    let pb_le_pc_hi = _mm_andnot_si128(_mm_cmpgt_epi16(pb_hi, pc_hi), _mm_set1_epi16(-1));
+    let mask_b_hi = _mm_andnot_si128(mask_a_hi, pb_le_pc_hi);
+
     let mask_c_hi = _mm_andnot_si128(_mm_or_si128(mask_a_hi, mask_b_hi), _mm_set1_epi16(-1));
 
     let pred_lo = _mm_or_si128(
@@ -650,25 +665,33 @@ pub unsafe fn filter_paeth_avx2(row: &[u8], prev_row: &[u8], bpp: usize, output:
         let pb_hi = _mm256_abs_epi16(_mm256_sub_epi16(p_hi, b_hi));
         let pc_hi = _mm256_abs_epi16(_mm256_sub_epi16(p_hi, c_hi));
 
-        let mask_a_lo = _mm256_and_si256(
-            _mm256_cmpgt_epi16(pb_lo, pa_lo),
-            _mm256_cmpgt_epi16(pc_lo, pa_lo),
-        );
-        let mask_b_lo = _mm256_and_si256(
-            _mm256_cmpgt_epi16(pa_lo, pb_lo),
-            _mm256_cmpgt_epi16(pc_lo, pb_lo),
-        );
+        // PNG Paeth: choose a if pa <= pb && pa <= pc; else if pb <= pc choose b; else c
+        // AVX2 has cmpgt but not cmple, so we use: (a <= b) = NOT(a > b)
+        // mask_a = (pa <= pb) && (pa <= pc)
+        let pa_le_pb_lo =
+            _mm256_andnot_si256(_mm256_cmpgt_epi16(pa_lo, pb_lo), _mm256_set1_epi16(-1));
+        let pa_le_pc_lo =
+            _mm256_andnot_si256(_mm256_cmpgt_epi16(pa_lo, pc_lo), _mm256_set1_epi16(-1));
+        let mask_a_lo = _mm256_and_si256(pa_le_pb_lo, pa_le_pc_lo);
+
+        // mask_b = NOT(mask_a) && (pb <= pc)
+        let pb_le_pc_lo =
+            _mm256_andnot_si256(_mm256_cmpgt_epi16(pb_lo, pc_lo), _mm256_set1_epi16(-1));
+        let mask_b_lo = _mm256_andnot_si256(mask_a_lo, pb_le_pc_lo);
+
         let mask_c_lo =
             _mm256_andnot_si256(_mm256_or_si256(mask_a_lo, mask_b_lo), _mm256_set1_epi16(-1));
 
-        let mask_a_hi = _mm256_and_si256(
-            _mm256_cmpgt_epi16(pb_hi, pa_hi),
-            _mm256_cmpgt_epi16(pc_hi, pa_hi),
-        );
-        let mask_b_hi = _mm256_and_si256(
-            _mm256_cmpgt_epi16(pa_hi, pb_hi),
-            _mm256_cmpgt_epi16(pc_hi, pb_hi),
-        );
+        let pa_le_pb_hi =
+            _mm256_andnot_si256(_mm256_cmpgt_epi16(pa_hi, pb_hi), _mm256_set1_epi16(-1));
+        let pa_le_pc_hi =
+            _mm256_andnot_si256(_mm256_cmpgt_epi16(pa_hi, pc_hi), _mm256_set1_epi16(-1));
+        let mask_a_hi = _mm256_and_si256(pa_le_pb_hi, pa_le_pc_hi);
+
+        let pb_le_pc_hi =
+            _mm256_andnot_si256(_mm256_cmpgt_epi16(pb_hi, pc_hi), _mm256_set1_epi16(-1));
+        let mask_b_hi = _mm256_andnot_si256(mask_a_hi, pb_le_pc_hi);
+
         let mask_c_hi =
             _mm256_andnot_si256(_mm256_or_si256(mask_a_hi, mask_b_hi), _mm256_set1_epi16(-1));
 
