@@ -2166,6 +2166,45 @@ mod tests {
     }
 
     #[test]
+    fn test_deflate_stored_sets_bfinal_on_last_block() {
+        // Size > 65535 forces multiple stored blocks. Verify BFINAL is set only on the last block.
+        let data = vec![0u8; 70_000];
+        let encoded = deflate_stored(&data);
+
+        let mut offset = 0;
+        let mut block_idx = 0;
+        let mut saw_final = false;
+
+        while offset < encoded.len() {
+            assert!(offset + 5 <= encoded.len(), "truncated block header");
+            let header = encoded[offset];
+            let bfinal = header & 0x01;
+            let btype = (header >> 1) & 0x03;
+            assert_eq!(btype, 0, "stored block must have BTYPE=00");
+
+            let len = u16::from_le_bytes([encoded[offset + 1], encoded[offset + 2]]) as usize;
+            let nlen = u16::from_le_bytes([encoded[offset + 3], encoded[offset + 4]]);
+            assert_eq!(nlen, !len as u16, "NLEN should be one's complement of LEN");
+
+            offset += 5 + len;
+            block_idx += 1;
+
+            if offset >= encoded.len() {
+                assert_eq!(bfinal, 1, "last block must have BFINAL=1");
+                saw_final = true;
+            } else {
+                assert_eq!(bfinal, 0, "non-final blocks must have BFINAL=0");
+            }
+        }
+
+        assert!(saw_final, "should see final block");
+        assert!(
+            block_idx >= 2,
+            "expected multiple stored blocks for large input"
+        );
+    }
+
+    #[test]
     fn test_packed_fixed_matches_standard() {
         let data = b"aaaaabbbbccddeeffgg";
         let mut lz = Lz77Compressor::new(6);
