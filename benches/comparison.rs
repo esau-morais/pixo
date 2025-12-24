@@ -513,7 +513,6 @@ fn bench_jpeg_all_presets(c: &mut Criterion) {
                         black_box(pixels),
                         *size,
                         *size,
-                        85,
                         ColorType::Rgb,
                         &jpeg::JpegOptions::fast(85),
                     )
@@ -533,7 +532,6 @@ fn bench_jpeg_all_presets(c: &mut Criterion) {
                         black_box(pixels),
                         *size,
                         *size,
-                        85,
                         ColorType::Rgb,
                         &jpeg::JpegOptions::balanced(85),
                     )
@@ -553,7 +551,6 @@ fn bench_jpeg_all_presets(c: &mut Criterion) {
                         black_box(pixels),
                         *size,
                         *size,
-                        85,
                         ColorType::Rgb,
                         &jpeg::JpegOptions::max(85),
                     )
@@ -1112,7 +1109,7 @@ fn measure_jpeg_encode(
 
     // Warm up
     for _ in 0..3 {
-        jpeg::encode_with_options_into(&mut buf, pixels, width, height, 85, ColorType::Rgb, opts)
+        jpeg::encode_with_options_into(&mut buf, pixels, width, height, ColorType::Rgb, opts)
             .unwrap();
     }
 
@@ -1120,7 +1117,7 @@ fn measure_jpeg_encode(
     let start = Instant::now();
     let iterations = 10;
     for _ in 0..iterations {
-        jpeg::encode_with_options_into(&mut buf, pixels, width, height, 85, ColorType::Rgb, opts)
+        jpeg::encode_with_options_into(&mut buf, pixels, width, height, ColorType::Rgb, opts)
             .unwrap();
     }
     let duration = start.elapsed() / iterations;

@@ -142,7 +142,7 @@ fn test_invalid_restart_interval() {
     let pixels = vec![128u8; 8 * 8 * 3];
     let mut opts = jpeg::JpegOptions::fast(85);
     opts.restart_interval = Some(0);
-    let result = jpeg::encode_with_options(&pixels, 8, 8, 85, ColorType::Rgb, &opts);
+    let result = jpeg::encode_with_options(&pixels, 8, 8, ColorType::Rgb, &opts);
     assert!(result.is_err());
 }
 
@@ -274,9 +274,9 @@ fn test_jpeg_subsampling_420() {
     opts_420.subsampling = jpeg::Subsampling::S420;
 
     let jpeg_444 =
-        jpeg::encode_with_options(&rgb, width, height, 75, ColorType::Rgb, &opts_444).unwrap();
+        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts_444).unwrap();
     let jpeg_420 =
-        jpeg::encode_with_options(&rgb, width, height, 75, ColorType::Rgb, &opts_420).unwrap();
+        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts_420).unwrap();
 
     // 4:2:0 should not be larger than 4:4:4 for the same image/quality.
     assert!(jpeg_420.len() <= jpeg_444.len());
@@ -299,7 +299,7 @@ fn test_jpeg_restart_interval_marker_and_decode() {
     opts.restart_interval = Some(4);
 
     let jpeg_bytes =
-        jpeg::encode_with_options(&rgb, width, height, 80, ColorType::Rgb, &opts).unwrap();
+        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
 
     // Ensure DRI marker (0xFFDD) exists
     let mut found_dri = false;
@@ -330,7 +330,7 @@ fn test_jpeg_marker_structure_with_restart() {
     opts.restart_interval = Some(4);
 
     let jpeg_bytes =
-        jpeg::encode_with_options(&rgb, width, height, 85, ColorType::Rgb, &opts).unwrap();
+        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
 
     assert!(jpeg_bytes.starts_with(&[0xFF, 0xD8]), "missing SOI");
     assert!(jpeg_bytes.ends_with(&[0xFF, 0xD9]), "missing EOI");
@@ -402,12 +402,87 @@ fn test_jpeg_no_restart_marker_without_interval() {
     let opts = jpeg::JpegOptions::fast(80);
 
     let jpeg_bytes =
-        jpeg::encode_with_options(&rgb, width, height, 80, ColorType::Rgb, &opts).unwrap();
+        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
 
     assert!(
         !jpeg_bytes.windows(2).any(|w| w == [0xFF, 0xDD]),
         "Unexpected DRI marker when restart_interval is None"
     );
+}
+
+/// When MCU count is exactly divisible by restart interval, no trailing restart marker
+/// should be written after the final MCU. The restart marker is only useful when there
+/// are more MCUs to follow.
+#[test]
+fn test_jpeg_no_trailing_restart_marker_when_divisible() {
+    // 16x16 image with 4:4:4 subsampling has exactly 4 MCUs (2x2 blocks of 8x8)
+    // Setting restart_interval = 4 means we hit exactly 4 MCUs = interval × 1
+    // Without the fix, a restart marker would be written after the 4th MCU
+    let width = 16;
+    let height = 16;
+    let mut rng = StdRng::seed_from_u64(9999);
+    let mut rgb = vec![0u8; (width * height * 3) as usize];
+    rng.fill(rgb.as_mut_slice());
+
+    let mut opts = jpeg::JpegOptions::fast(85);
+    opts.restart_interval = Some(4); // Exactly matches total MCU count
+
+    let jpeg_bytes =
+        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
+
+    // Verify EOI is present
+    assert!(jpeg_bytes.ends_with(&[0xFF, 0xD9]), "missing EOI");
+
+    // Check that no restart marker (0xFFD0-0xFFD7) appears right before EOI
+    // The last few bytes before EOI should be scan data, not a restart marker
+    let len = jpeg_bytes.len();
+    if len >= 4 {
+        let before_eoi = &jpeg_bytes[len - 4..len - 2];
+        let is_restart_marker = before_eoi[0] == 0xFF && (before_eoi[1] >= 0xD0 && before_eoi[1] <= 0xD7);
+        assert!(
+            !is_restart_marker,
+            "Found trailing restart marker {:02X}{:02X} before EOI - should not be present when MCU count is exactly divisible by interval",
+            before_eoi[0], before_eoi[1]
+        );
+    }
+
+    // Also verify the image decodes correctly
+    let decoded = image::load_from_memory(&jpeg_bytes).expect("decode should succeed");
+    assert_eq!(decoded.dimensions(), (width, height));
+}
+
+/// Test with 4:2:0 subsampling where MCU count is exactly divisible by restart interval.
+#[test]
+fn test_jpeg_no_trailing_restart_marker_420_divisible() {
+    // 32x32 image with 4:2:0 subsampling: MCU is 16x16, so we have 4 MCUs (2x2)
+    let width = 32;
+    let height = 32;
+    let mut rng = StdRng::seed_from_u64(8888);
+    let mut rgb = vec![0u8; (width * height * 3) as usize];
+    rng.fill(rgb.as_mut_slice());
+
+    let mut opts = jpeg::JpegOptions::fast(85);
+    opts.subsampling = jpeg::Subsampling::S420;
+    opts.restart_interval = Some(2); // 4 MCUs / 2 = exactly 2 intervals
+
+    let jpeg_bytes =
+        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
+
+    assert!(jpeg_bytes.ends_with(&[0xFF, 0xD9]), "missing EOI");
+
+    // Check no trailing restart marker before EOI
+    let len = jpeg_bytes.len();
+    if len >= 4 {
+        let before_eoi = &jpeg_bytes[len - 4..len - 2];
+        let is_restart_marker = before_eoi[0] == 0xFF && (before_eoi[1] >= 0xD0 && before_eoi[1] <= 0xD7);
+        assert!(
+            !is_restart_marker,
+            "Found trailing restart marker before EOI in 4:2:0 mode"
+        );
+    }
+
+    let decoded = image::load_from_memory(&jpeg_bytes).expect("decode should succeed");
+    assert_eq!(decoded.dimensions(), (width, height));
 }
 
 fn jpeg_case_strategy() -> impl Strategy<
@@ -455,7 +530,7 @@ proptest! {
         opts.restart_interval = restart_interval;
 
         let encoded =
-            jpeg::encode_with_options(&data, w, h, quality, color_type, &opts).unwrap();
+            jpeg::encode_with_options(&data, w, h, color_type, &opts).unwrap();
 
         if restart_interval.is_some() {
             prop_assert!(encoded.windows(2).any(|w| w == [0xFF, 0xDD]));
@@ -508,9 +583,9 @@ fn test_jpeg_optimize_huffman_structured_image() {
     let opt_opts = jpeg::JpegOptions::balanced(85);
 
     let default_bytes =
-        jpeg::encode_with_options(&rgb, width, height, 85, ColorType::Rgb, &base_opts).unwrap();
+        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &base_opts).unwrap();
     let optimized_bytes =
-        jpeg::encode_with_options(&rgb, width, height, 85, ColorType::Rgb, &opt_opts).unwrap();
+        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opt_opts).unwrap();
 
     assert!(
         optimized_bytes.len() <= default_bytes.len(),

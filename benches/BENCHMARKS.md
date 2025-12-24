@@ -76,7 +76,7 @@ Testing on actual images from the test fixtures:
 - On images with solid colors/flat areas (rocket.png), **comprs wins by 28%**
 - On complex photographic images, pngquant's libimagequant produces smaller files
 - Both achieve **50-80% reduction** compared to lossless PNG
-- comprs has zero external dependencies (173 KB WASM vs pngquant's native binary)
+- comprs has zero external dependencies (214 KB WASM vs pngquant's native binary)
 
 ### Synthetic Benchmark (512×512 gradient)
 
@@ -99,7 +99,7 @@ Gradient images are a **worst-case scenario** for quantization because they cont
 | **Images with flat colors/UI**    | comprs Lossy often beats pngquant                           |
 | **Complex photos, max compression** | pngquant produces smaller files                           |
 | **Icons and logos (<256 colors)** | Use lossless - already optimized                            |
-| **WASM bundle size matters**      | comprs Lossy (no external deps, 173 KB WASM)                |
+| **WASM bundle size matters**      | comprs Lossy (no external deps, 214 KB WASM)                |
 
 ### Lossy PNG Settings
 
@@ -148,7 +148,7 @@ Critical for web applications where bundle size impacts load time.
 
 | Library         | WASM Size  | Notes                              |
 | --------------- | ---------- | ---------------------------------- |
-| **comprs**      | **173 KB** | Zero deps, pure Rust, lossy PNG [1] |
+| **comprs**      | **214 KB** | Zero deps, pure Rust, lossy PNG [1] |
 | wasm-mozjpeg    | ~208 KB   | Emscripten compiled                |
 | squoosh oxipng  | ~625 KB   | Google's Squoosh codec             |
 | squoosh mozjpeg | ~803 KB   | Google's Squoosh codec             |
@@ -175,7 +175,7 @@ Comparison of Rust image compression libraries.
 
 | Library           | WASM-friendly   | Binary Size  | Throughput | Notes                                    |
 | ----------------- | --------------- | ------------ | ---------- | ---------------------------------------- |
-| **comprs**        | Yes             | 173 KB       | Good       | Zero deps, pure Rust, lossy PNG support  |
+| **comprs**        | Yes             | 214 KB       | Good       | Zero deps, pure Rust, lossy PNG support  |
 | `image`           | Yes             | ~2-4 MB      | Good       | Pure Rust, many codecs included          |
 | `photon-rs`       | Yes             | ~200-400 KB  | Excellent  | Pure Rust, designed for WASM [2]         |
 | `zune-image`      | Yes             | ~500 KB-1 MB | Excellent  | Pure Rust, SIMD optimized [3]            |
@@ -225,7 +225,7 @@ Comparison of JavaScript and Node.js image compression options.
 
 | If you need...             | PNG                   | JPEG                  | Why                                  |
 | -------------------------- | --------------------- | --------------------- | ------------------------------------ |
-| Smallest WASM binary       | comprs (173 KB)       | comprs (173 KB)       | 3-4× smaller than Squoosh            |
+| Smallest WASM binary       | comprs (214 KB)       | comprs (214 KB)       | 3× smaller than Squoosh              |
 | Best lossless compression  | oxipng                | N/A                   | Gold standard, but larger binaries   |
 | Best lossy PNG compression | comprs Lossy/pngquant | N/A                   | 50-80% smaller than lossless         |
 | Fastest encoding           | comprs Fast or image  | comprs Fast           | Minimal overhead                     |
@@ -238,7 +238,7 @@ Comparison of JavaScript and Node.js image compression options.
 
 | Scenario                                     | Recommendation                                          |
 | -------------------------------------------- | ------------------------------------------------------- |
-| **Building a web app with WASM?**            | Use comprs (173 KB binary, good compression)            |
+| **Building a web app with WASM?**            | Use comprs (214 KB binary, good compression)            |
 | **Need smallest PNG file size?**             | Use comprs Lossy (50-80% smaller than lossless)         |
 | **CLI tool, size doesn't matter?**           | Use oxipng/mozjpeg/pngquant (best compression ratios)   |
 | **Node.js server, need speed?**              | Use sharp (native bindings, excellent performance)      |

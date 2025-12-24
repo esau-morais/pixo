@@ -44,6 +44,7 @@
     subsampling420: true,
     pngPreset: 1 as PresetLevel, // 0=faster, 1=auto, 2=smallest
     pngLossless: false, // Default OFF = lossy enabled for smaller PNGs
+    jpegPreset: 1 as PresetLevel, // 0=fast, 1=balanced, 2=max
   });
 
   let detectedFormat = $derived.by(() => {
@@ -224,17 +225,18 @@
     try {
       // Use the job's original format for compression
       const jobFormat = job.type === "image/jpeg" ? "jpeg" : "png";
-      // PNG slider: 0=Smaller(left), 1=Auto, 2=Faster(right)
-      // Map to presets: 0->2(smallest), 1->1(auto), 2->0(faster)
+      // Slider: 0=Smaller(left), 1=Auto, 2=Faster(right)
+      // Map to presets: 0->2(max), 1->1(balanced), 2->0(fast)
       const pngPresetValue = (2 - globalOptions.pngPreset) as PresetLevel;
+      const jpegPresetValue = (2 - globalOptions.jpegPreset) as PresetLevel;
       const { blob, elapsedMs } = await compressImage(job.imageData, {
         ...globalOptions,
         format: jobFormat,
         hasAlpha: job.hasAlpha,
-        // Use preset-based encoding: PNG uses inverted pngPreset, JPEG uses auto (1)
-        preset: jobFormat === "png" ? pngPresetValue : 1 as PresetLevel,
-        // Pass lossless option for PNG
-        lossless: jobFormat === "png" ? globalOptions.pngLossless : undefined,
+        // Use preset-based encoding with inverted slider values
+        preset: jobFormat === "png" ? pngPresetValue : jpegPresetValue,
+        // Pass lossy option for PNG (inverted from lossless checkbox)
+        lossy: jobFormat === "png" ? !globalOptions.pngLossless : undefined,
       });
       const url = URL.createObjectURL(blob);
       if (job.result?.url) URL.revokeObjectURL(job.result.url);
@@ -840,6 +842,20 @@
           <span class="w-6 sm:w-8 text-neutral-400" data-testid="quality-value"
             >{globalOptions.quality}</span
           >
+        </label>
+        <label class="flex items-center gap-2 text-xs">
+          <span class="text-neutral-500 whitespace-nowrap">Smaller</span>
+          <input
+            type="range"
+            min="0"
+            max="2"
+            step="1"
+            class="w-16 sm:w-24"
+            bind:value={globalOptions.jpegPreset}
+            onchange={recompressAll}
+            data-testid="jpeg-preset-slider"
+          />
+          <span class="text-neutral-500 whitespace-nowrap">Faster</span>
         </label>
       {:else if detectedFormat === "png"}
         <label class="flex items-center gap-2 text-xs">

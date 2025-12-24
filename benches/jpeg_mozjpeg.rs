@@ -178,7 +178,6 @@ fn bench_jpeg_presets(c: &mut Criterion) {
                     black_box(&img.pixels),
                     img.width,
                     img.height,
-                    85,
                     ColorType::Rgb,
                     &jpeg::JpegOptions::fast(85),
                 )
@@ -194,7 +193,6 @@ fn bench_jpeg_presets(c: &mut Criterion) {
                     black_box(&img.pixels),
                     img.width,
                     img.height,
-                    85,
                     ColorType::Rgb,
                     &jpeg::JpegOptions::balanced(85),
                 )
@@ -210,7 +208,6 @@ fn bench_jpeg_presets(c: &mut Criterion) {
                     black_box(&img.pixels),
                     img.width,
                     img.height,
-                    85,
                     ColorType::Rgb,
                     &jpeg::JpegOptions::max(85),
                 )
@@ -244,7 +241,6 @@ fn bench_jpeg_vs_image_crate(c: &mut Criterion) {
                     black_box(&img.pixels),
                     img.width,
                     img.height,
-                    85,
                     ColorType::Rgb,
                     &jpeg::JpegOptions::max(85),
                 )
@@ -313,7 +309,6 @@ fn print_size_comparison() {
             &img.pixels,
             img.width,
             img.height,
-            85,
             ColorType::Rgb,
             &jpeg::JpegOptions::fast(85),
         )
@@ -325,7 +320,6 @@ fn print_size_comparison() {
             &img.pixels,
             img.width,
             img.height,
-            85,
             ColorType::Rgb,
             &jpeg::JpegOptions::balanced(85),
         )
@@ -337,7 +331,6 @@ fn print_size_comparison() {
             &img.pixels,
             img.width,
             img.height,
-            85,
             ColorType::Rgb,
             &jpeg::JpegOptions::max(85),
         )
@@ -490,7 +483,7 @@ fn measure_encode_time(
 
     // Warm up
     for _ in 0..3 {
-        jpeg::encode_with_options_into(&mut buf, pixels, width, height, 85, ColorType::Rgb, opts)
+        jpeg::encode_with_options_into(&mut buf, pixels, width, height, ColorType::Rgb, opts)
             .unwrap();
     }
 
@@ -498,7 +491,7 @@ fn measure_encode_time(
     let start = Instant::now();
     let iterations = 10;
     for _ in 0..iterations {
-        jpeg::encode_with_options_into(&mut buf, pixels, width, height, 85, ColorType::Rgb, opts)
+        jpeg::encode_with_options_into(&mut buf, pixels, width, height, ColorType::Rgb, opts)
             .unwrap();
     }
     start.elapsed() / iterations

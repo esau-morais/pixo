@@ -1,12 +1,27 @@
 //! WebAssembly bindings for comprs.
 //!
-//! This module provides wasm-bindgen exports for encoding PNG and JPEG images
-//! from JavaScript/TypeScript. Enable with the `wasm` feature.
+//! This module provides a minimal WASM API for encoding PNG and JPEG images.
+//! Only 3 functions are exported to keep the binary size small (~214 KB).
+//!
+//! # Building
+//!
+//! ```bash
+//! # Install wasm target and wasm-bindgen
+//! rustup target add wasm32-unknown-unknown
+//! cargo install wasm-bindgen-cli
+//!
+//! # Build (if using Homebrew Rust, may need: RUSTC=~/.cargo/bin/rustc)
+//! cargo build --target wasm32-unknown-unknown --release --features wasm
+//!
+//! # Generate JS bindings
+//! wasm-bindgen --target web --out-dir web/src/lib/comprs-wasm --out-name comprs \
+//!   target/wasm32-unknown-unknown/release/comprs.wasm
+//! ```
 //!
 //! # Example (JavaScript)
 //!
 //! ```javascript
-//! import init, { encode_png, encode_jpeg } from 'comprs';
+//! import init, { encodePng, encodeJpeg, bytesPerPixel } from 'comprs';
 //!
 //! await init();
 //!
@@ -14,26 +29,21 @@
 //! const ctx = canvas.getContext('2d');
 //! const imageData = ctx.getImageData(0, 0, width, height);
 //!
-//! // Encode as PNG (RGBA = 3)
-//! const pngBytes = encode_png(imageData.data, width, height, 3, 6);
+//! // Encode as PNG (RGBA=3, preset=1 balanced, lossy=true for smaller files)
+//! const pngBytes = encodePng(imageData.data, width, height, 3, 1, true);
 //!
-//! // Encode as JPEG (need RGB, so strip alpha first)
+//! // Encode as JPEG (RGB=2, quality=85, preset=1 balanced, subsampling=true)
 //! const rgb = stripAlpha(imageData.data);
-//! const jpegBytes = encode_jpeg(rgb, width, height, 85, 2, false);
+//! const jpegBytes = encodeJpeg(rgb, width, height, 2, 85, 1, true);
 //! ```
 
 use wasm_bindgen::prelude::*;
 
 use crate::color::ColorType;
 use crate::jpeg::{self, JpegOptions, Subsampling};
-use crate::png::{self, FilterStrategy, PngOptions};
+use crate::png::{self, PngOptions};
 
 /// Convert a u8 color type code to ColorType enum.
-///
-/// - 0 = Gray
-/// - 1 = GrayAlpha
-/// - 2 = Rgb
-/// - 3 = Rgba
 fn color_type_from_u8(value: u8) -> Result<ColorType, JsError> {
     match value {
         0 => Ok(ColorType::Gray),
@@ -54,7 +64,8 @@ fn color_type_from_u8(value: u8) -> Result<ColorType, JsError> {
 /// * `width` - Image width in pixels
 /// * `height` - Image height in pixels
 /// * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
-/// * `compression_level` - Compression level 1-9 (6 recommended)
+/// * `preset` - Optimization preset: 0=fast, 1=balanced, 2=max
+/// * `lossy` - If true, enable quantization for smaller files (reduces colors to 256)
 ///
 /// # Returns
 ///
@@ -65,67 +76,12 @@ pub fn encode_png(
     width: u32,
     height: u32,
     color_type: u8,
-    compression_level: u8,
+    preset: u8,
+    lossy: bool,
 ) -> Result<Vec<u8>, JsError> {
     let color = color_type_from_u8(color_type)?;
-
-    let options = PngOptions {
-        compression_level,
-        filter_strategy: FilterStrategy::Adaptive,
-        ..Default::default()
-    };
-
-    png::encode_with_options(data, width, height, color, &options)
-        .map_err(|e| JsError::new(&e.to_string()))
-}
-
-/// Encode raw pixel data as PNG with a specific filter strategy.
-///
-/// # Arguments
-///
-/// * `data` - Raw pixel data as Uint8Array (row-major order)
-/// * `width` - Image width in pixels
-/// * `height` - Image height in pixels
-/// * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
-/// * `compression_level` - Compression level 1-9 (6 recommended)
-/// * `filter` - Filter strategy: 0=None, 1=Sub, 2=Up, 3=Average, 4=Paeth, 5=Adaptive, 6=AdaptiveFast, 7=MinSum
-///
-/// # Returns
-///
-/// PNG file bytes as Uint8Array.
-#[wasm_bindgen(js_name = "encodePngWithFilter")]
-pub fn encode_png_with_filter(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    color_type: u8,
-    compression_level: u8,
-    filter: u8,
-) -> Result<Vec<u8>, JsError> {
-    let color = color_type_from_u8(color_type)?;
-
-    let filter_strategy = match filter {
-        0 => FilterStrategy::None,
-        1 => FilterStrategy::Sub,
-        2 => FilterStrategy::Up,
-        3 => FilterStrategy::Average,
-        4 => FilterStrategy::Paeth,
-        5 => FilterStrategy::Adaptive,
-        6 => FilterStrategy::AdaptiveFast,
-        7 => FilterStrategy::MinSum,
-        _ => {
-            return Err(JsError::new(&format!(
-                "Invalid filter: {filter}. Expected 0-7",
-            )))
-        }
-    };
-
-    let options = PngOptions {
-        compression_level,
-        filter_strategy,
-        ..Default::default()
-    };
-
+    // lossy=true means we want quantization, which is lossless=false internally
+    let options = PngOptions::from_preset_with_lossless(preset, !lossy);
     png::encode_with_options(data, width, height, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -134,11 +90,12 @@ pub fn encode_png_with_filter(
 ///
 /// # Arguments
 ///
-/// * `data` - Raw pixel data as Uint8Array (row-major order)
+/// * `data` - Raw pixel data as Uint8Array (row-major order, RGB only)
 /// * `width` - Image width in pixels
 /// * `height` - Image height in pixels
-/// * `quality` - Quality level 1-100 (85 recommended)
 /// * `color_type` - Color type: 0=Gray, 2=Rgb (JPEG only supports these)
+/// * `quality` - Quality level 1-100 (85 recommended)
+/// * `preset` - Optimization preset: 0=fast, 1=balanced, 2=max
 /// * `subsampling_420` - If true, use 4:2:0 chroma subsampling (smaller files)
 ///
 /// # Returns
@@ -149,31 +106,10 @@ pub fn encode_jpeg(
     data: &[u8],
     width: u32,
     height: u32,
-    quality: u8,
     color_type: u8,
-    subsampling_420: bool,
-) -> Result<Vec<u8>, JsError> {
-    encode_jpeg_with_optimize(
-        data,
-        width,
-        height,
-        quality,
-        color_type,
-        subsampling_420,
-        false,
-    )
-}
-
-/// Encode JPEG with an explicit optimize_huffman toggle.
-#[wasm_bindgen(js_name = "encodeJpegWithOptions")]
-pub fn encode_jpeg_with_optimize(
-    data: &[u8],
-    width: u32,
-    height: u32,
     quality: u8,
-    color_type: u8,
+    preset: u8,
     subsampling_420: bool,
-    optimize_huffman: bool,
 ) -> Result<Vec<u8>, JsError> {
     let color = match color_type {
         0 => ColorType::Gray,
@@ -184,27 +120,17 @@ pub fn encode_jpeg_with_optimize(
             )))
         }
     };
-
-    let options = JpegOptions {
-        quality,
-        subsampling: if subsampling_420 {
-            Subsampling::S420
-        } else {
-            Subsampling::S444
-        },
-        restart_interval: None,
-        optimize_huffman,
-        progressive: false,
-        trellis_quant: false,
+    let mut options = JpegOptions::from_preset(quality, preset);
+    options.subsampling = if subsampling_420 {
+        Subsampling::S420
+    } else {
+        Subsampling::S444
     };
-
-    jpeg::encode_with_options(data, width, height, quality, color, &options)
+    jpeg::encode_with_options(data, width, height, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Get the number of bytes per pixel for a color type.
-///
-/// Useful for validating input data length.
 ///
 /// * 0 (Gray) = 1 byte
 /// * 1 (GrayAlpha) = 2 bytes
@@ -214,103 +140,6 @@ pub fn encode_jpeg_with_optimize(
 pub fn bytes_per_pixel(color_type: u8) -> Result<u8, JsError> {
     let color = color_type_from_u8(color_type)?;
     Ok(color.bytes_per_pixel() as u8)
-}
-
-/// Encode PNG with preset: 0=fast, 1=balanced, 2=max.
-///
-/// # Arguments
-///
-/// * `data` - Raw pixel data as Uint8Array (row-major order)
-/// * `width` - Image width in pixels
-/// * `height` - Image height in pixels
-/// * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
-/// * `preset` - Preset: 0=fast, 1=balanced, 2=max
-///
-/// # Returns
-///
-/// PNG file bytes as Uint8Array.
-#[wasm_bindgen(js_name = "encodePngPreset")]
-pub fn encode_png_preset(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    color_type: u8,
-    preset: u8,
-) -> Result<Vec<u8>, JsError> {
-    let color = color_type_from_u8(color_type)?;
-    let options = PngOptions::from_preset(preset);
-    png::encode_with_options(data, width, height, color, &options)
-        .map_err(|e| JsError::new(&e.to_string()))
-}
-
-/// Encode PNG with preset and lossless flag.
-///
-/// When `lossless` is false, enables auto-quantization for potentially
-/// significant size reduction (lossy compression). This can reduce file
-/// sizes by 50-80% for images with limited color palettes.
-///
-/// # Arguments
-///
-/// * `data` - Raw pixel data as Uint8Array (row-major order)
-/// * `width` - Image width in pixels
-/// * `height` - Image height in pixels
-/// * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
-/// * `preset` - Preset: 0=fast, 1=balanced, 2=max
-/// * `lossless` - If true, disable quantization (lossless). If false, enable auto-quantization (lossy).
-///
-/// # Returns
-///
-/// PNG file bytes as Uint8Array.
-#[wasm_bindgen(js_name = "encodePngPresetLossy")]
-pub fn encode_png_preset_lossy(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    color_type: u8,
-    preset: u8,
-    lossless: bool,
-) -> Result<Vec<u8>, JsError> {
-    let color = color_type_from_u8(color_type)?;
-    let options = PngOptions::from_preset_with_lossless(preset, lossless);
-    png::encode_with_options(data, width, height, color, &options)
-        .map_err(|e| JsError::new(&e.to_string()))
-}
-
-/// Encode JPEG with preset: 0=fast, 1=balanced, 2=max.
-///
-/// # Arguments
-///
-/// * `data` - Raw pixel data as Uint8Array (row-major order)
-/// * `width` - Image width in pixels
-/// * `height` - Image height in pixels
-/// * `quality` - Quality level 1-100 (85 recommended)
-/// * `color_type` - Color type: 0=Gray, 2=Rgb (JPEG only supports these)
-/// * `preset` - Preset: 0=fast, 1=balanced, 2=max
-///
-/// # Returns
-///
-/// JPEG file bytes as Uint8Array.
-#[wasm_bindgen(js_name = "encodeJpegPreset")]
-pub fn encode_jpeg_preset(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    quality: u8,
-    color_type: u8,
-    preset: u8,
-) -> Result<Vec<u8>, JsError> {
-    let color = match color_type {
-        0 => ColorType::Gray,
-        2 => ColorType::Rgb,
-        _ => {
-            return Err(JsError::new(&format!(
-                "Invalid color type for JPEG: {color_type}. Expected 0 (Gray) or 2 (Rgb)",
-            )))
-        }
-    };
-    let options = JpegOptions::from_preset(quality, preset);
-    jpeg::encode_with_options(data, width, height, quality, color, &options)
-        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 // Tests for the WASM module.
@@ -324,7 +153,8 @@ mod tests {
     #[test]
     fn test_encode_png_1x1() {
         let pixels = vec![255, 0, 0, 255]; // 1x1 red RGBA
-        let result = encode_png(&pixels, 1, 1, 3, 6);
+        // encode_png(data, w, h, color_type, preset, lossy)
+        let result = encode_png(&pixels, 1, 1, 3, 1, false);
         assert!(result.is_ok());
         let png = result.unwrap();
         // Check PNG signature
@@ -337,7 +167,8 @@ mod tests {
     #[test]
     fn test_encode_jpeg_1x1() {
         let pixels = vec![255, 0, 0]; // 1x1 red RGB
-        let result = encode_jpeg(&pixels, 1, 1, 85, 2, false);
+        // encode_jpeg(data, w, h, color_type, quality, preset, subsampling_420)
+        let result = encode_jpeg(&pixels, 1, 1, 2, 85, 1, false);
         assert!(result.is_ok());
         let jpeg = result.unwrap();
         // Check JPEG SOI marker
@@ -347,7 +178,7 @@ mod tests {
     #[test]
     fn test_invalid_color_type() {
         let pixels = vec![255, 0, 0];
-        let result = encode_png(&pixels, 1, 1, 99, 6);
+        let result = encode_png(&pixels, 1, 1, 99, 1, false);
         assert!(result.is_err());
     }
 
@@ -355,7 +186,7 @@ mod tests {
     fn test_jpeg_invalid_color_type() {
         let pixels = vec![255, 0, 0, 255];
         // JPEG doesn't support RGBA (color_type 3)
-        let result = encode_jpeg(&pixels, 1, 1, 85, 3, false);
+        let result = encode_jpeg(&pixels, 1, 1, 3, 85, 1, false);
         assert!(result.is_err());
     }
 

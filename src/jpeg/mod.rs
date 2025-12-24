@@ -51,15 +51,7 @@ const SOS: u16 = 0xFFDA; // Start of Scan
 pub fn encode(data: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u8>> {
     let options = JpegOptions::fast(quality);
     let mut output = Vec::new();
-    encode_with_options_into(
-        &mut output,
-        data,
-        width,
-        height,
-        quality,
-        ColorType::Rgb,
-        &options,
-    )?;
+    encode_with_options_into(&mut output, data, width, height, ColorType::Rgb, &options)?;
     Ok(output)
 }
 
@@ -73,15 +65,7 @@ pub fn encode_with_color(
 ) -> Result<Vec<u8>> {
     let options = JpegOptions::fast(quality);
     let mut output = Vec::new();
-    encode_with_options_into(
-        &mut output,
-        data,
-        width,
-        height,
-        quality,
-        color_type,
-        &options,
-    )?;
+    encode_with_options_into(&mut output, data, width, height, color_type, &options)?;
     Ok(output)
 }
 
@@ -173,24 +157,25 @@ impl JpegOptions {
 }
 
 /// Encode raw pixel data as JPEG with options.
+///
+/// # Arguments
+/// * `data` - Raw pixel data (RGB or Gray, row-major order)
+/// * `width` - Image width in pixels
+/// * `height` - Image height in pixels
+/// * `color_type` - Color type (Rgb or Gray)
+/// * `options` - JPEG encoding options (includes quality)
+///
+/// # Returns
+/// Complete JPEG file as bytes.
 pub fn encode_with_options(
     data: &[u8],
     width: u32,
     height: u32,
-    _quality: u8,
     color_type: ColorType,
     options: &JpegOptions,
 ) -> Result<Vec<u8>> {
     let mut output = Vec::new();
-    encode_with_options_into(
-        &mut output,
-        data,
-        width,
-        height,
-        _quality,
-        color_type,
-        options,
-    )?;
+    encode_with_options_into(&mut output, data, width, height, color_type, options)?;
     Ok(output)
 }
 
@@ -198,12 +183,19 @@ pub fn encode_with_options(
 ///
 /// The `output` buffer will be cleared and reused, allowing callers to avoid
 /// repeated allocations across multiple encodes.
+///
+/// # Arguments
+/// * `output` - Buffer to write JPEG data into (will be cleared)
+/// * `data` - Raw pixel data (RGB or Gray, row-major order)
+/// * `width` - Image width in pixels
+/// * `height` - Image height in pixels
+/// * `color_type` - Color type (Rgb or Gray)
+/// * `options` - JPEG encoding options (includes quality)
 pub fn encode_with_options_into(
     output: &mut Vec<u8>,
     data: &[u8],
     width: u32,
     height: u32,
-    _quality: u8,
     color_type: ColorType,
     options: &JpegOptions,
 ) -> Result<()> {
@@ -1078,9 +1070,12 @@ fn encode_scan(
                           prev_dc_cb: &mut i16,
                           prev_dc_cr: &mut i16,
                           mcu_count: u32,
+                          total_mcus: u32,
                           rst_idx: &mut u8| {
         if let Some(interval) = restart_interval {
-            if interval > 0 && mcu_count.is_multiple_of(interval as u32) {
+            // Only write restart marker if there are more MCUs to follow.
+            // Skip the marker after the final MCU to avoid redundant bytes.
+            if interval > 0 && mcu_count.is_multiple_of(interval as u32) && mcu_count < total_mcus {
                 writer.flush();
                 writer.write_bytes(&[0xFF, 0xD0 + (*rst_idx & 0x07)]);
                 *rst_idx = (*rst_idx + 1) & 0x07;
@@ -1094,6 +1089,7 @@ fn encode_scan(
     // Process blocks
     match (color_type, subsampling) {
         (ColorType::Gray, _) => {
+            let total_mcus = ((padded_width / 8) * (padded_height / 8)) as u32;
             for block_y in (0..padded_height).step_by(8) {
                 for block_x in (0..padded_width).step_by(8) {
                     let (y_block, _, _) =
@@ -1108,12 +1104,14 @@ fn encode_scan(
                         &mut prev_dc_cb,
                         &mut prev_dc_cr,
                         mcu_count,
+                        total_mcus,
                         &mut rst_idx,
                     );
                 }
             }
         }
         (_, Subsampling::S444) => {
+            let total_mcus = ((padded_width / 8) * (padded_height / 8)) as u32;
             for block_y in (0..padded_height).step_by(8) {
                 for block_x in (0..padded_width).step_by(8) {
                     let (y_block, cb_block, cr_block) =
@@ -1140,6 +1138,7 @@ fn encode_scan(
                         &mut prev_dc_cb,
                         &mut prev_dc_cr,
                         mcu_count,
+                        total_mcus,
                         &mut rst_idx,
                     );
                 }
@@ -1148,6 +1147,7 @@ fn encode_scan(
         (_, Subsampling::S420) => {
             let padded_width_420 = (width + 15) & !15;
             let padded_height_420 = (height + 15) & !15;
+            let total_mcus = ((padded_width_420 / 16) * (padded_height_420 / 16)) as u32;
 
             for mcu_y in (0..padded_height_420).step_by(16) {
                 for mcu_x in (0..padded_width_420).step_by(16) {
@@ -1178,6 +1178,7 @@ fn encode_scan(
                         &mut prev_dc_cb,
                         &mut prev_dc_cr,
                         mcu_count,
+                        total_mcus,
                         &mut rst_idx,
                     );
                 }
@@ -1348,13 +1349,13 @@ mod tests {
         let pixels1 = vec![0u8; 3]; // 1x1 black
         let opts = JpegOptions::fast(85);
 
-        encode_with_options_into(&mut output, &pixels1, 1, 1, 85, ColorType::Rgb, &opts).unwrap();
+        encode_with_options_into(&mut output, &pixels1, 1, 1, ColorType::Rgb, &opts).unwrap();
         let first = output.clone();
         let first_cap = output.capacity();
         assert!(!first.is_empty());
 
         let pixels2 = vec![255u8, 0, 0]; // 1x1 red
-        encode_with_options_into(&mut output, &pixels2, 1, 1, 85, ColorType::Rgb, &opts).unwrap();
+        encode_with_options_into(&mut output, &pixels2, 1, 1, ColorType::Rgb, &opts).unwrap();
 
         assert_ne!(first, output);
         assert!(output.capacity() >= first_cap);

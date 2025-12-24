@@ -115,7 +115,6 @@ fn jpeg_encoding_benchmark(c: &mut Criterion) {
                         black_box(pixels),
                         *size,
                         *size,
-                        85,
                         ColorType::Rgb,
                         &jpeg::JpegOptions {
                             quality: 85,
@@ -142,7 +141,6 @@ fn jpeg_encoding_benchmark(c: &mut Criterion) {
                         black_box(pixels),
                         *size,
                         *size,
-                        85,
                         ColorType::Rgb,
                         &opts_420,
                     )
@@ -254,7 +252,6 @@ fn compression_ratio_benchmark(c: &mut Criterion) {
                         black_box(&gradient),
                         *width,
                         *height,
-                        *quality,
                         ColorType::Rgb,
                         &jpeg::JpegOptions {
                             quality: *quality,
