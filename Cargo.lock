@@ -274,7 +274,6 @@ dependencies = [
  "image",
  "imagequant",
  "jpeg-decoder",
- "js-sys",
  "png",
  "proptest",
  "rand 0.8.5",
