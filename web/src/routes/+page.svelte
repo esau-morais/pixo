@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { compressImage, initWasm, type PngFilter, type PresetLevel } from "$lib/wasm";
+  import { compressImage, initWasm, type PresetLevel } from "$lib/wasm";
   import { onDestroy, onMount } from "svelte";
   import JSZip from "jszip";
 
@@ -39,10 +39,9 @@
 
   let globalOptions = $state({
     quality: 85,
-    compressionLevel: 6,
-    filter: "adaptive" as PngFilter,
     subsampling420: true,
     pngPreset: 1 as PresetLevel, // 0=faster, 1=auto, 2=smallest
+    pngLossless: false, // Default OFF = lossy enabled for smaller PNGs
   });
 
   let detectedFormat = $derived.by(() => {
@@ -224,14 +223,16 @@
       // Use the job's original format for compression
       const jobFormat = job.type === "image/jpeg" ? "jpeg" : "png";
       // PNG slider: 0=Smaller(left), 1=Auto, 2=Faster(right)
-      // Map to presets: 0->2(smallest), 1->1(auto), 2->0(faster)
+      // Map to presets: 0->2(max), 1->1(balanced), 2->0(fast)
       const pngPresetValue = (2 - globalOptions.pngPreset) as PresetLevel;
       const { blob, elapsedMs } = await compressImage(job.imageData, {
         ...globalOptions,
         format: jobFormat,
         hasAlpha: job.hasAlpha,
-        // Use preset-based encoding: PNG uses inverted pngPreset, JPEG uses auto (1)
+        // PNG uses slider preset, JPEG uses balanced (1)
         preset: jobFormat === "png" ? pngPresetValue : 1 as PresetLevel,
+        // Pass lossy option for PNG (inverted from lossless checkbox)
+        lossy: jobFormat === "png" ? !globalOptions.pngLossless : undefined,
       });
       const url = URL.createObjectURL(blob);
       if (job.result?.url) URL.revokeObjectURL(job.result.url);
@@ -852,6 +853,16 @@
             data-testid="png-preset-slider"
           />
           <span class="text-neutral-500 whitespace-nowrap">Faster</span>
+        </label>
+        <label class="flex items-center gap-2 text-xs cursor-pointer" title="Enable lossless compression (larger files, preserves all colors)">
+          <input
+            type="checkbox"
+            class="accent-neutral-400"
+            bind:checked={globalOptions.pngLossless}
+            onchange={recompressAll}
+            data-testid="png-lossless-checkbox"
+          />
+          <span class="text-neutral-400">Lossless</span>
         </label>
       {/if}
       <!-- When mixed, no format-specific controls are shown -->

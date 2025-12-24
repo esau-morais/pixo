@@ -146,23 +146,23 @@ comprs input.png -o output.jpg -v
 
 #### CLI Options
 
-| Option              | Description                                                      | Default                    |
-| ------------------- | ---------------------------------------------------------------- | -------------------------- |
-| `-o, --output`      | Output file path                                                 | `<input>.compressed.<ext>` |
-| `-f, --format`      | Output format (`png`, `jpeg`, `jpg`)                             | Detected from extension    |
-| `-q, --quality`     | JPEG quality (1-100)                                             | 85                         |
-| `--jpeg-optimize-huffman` | Optimize JPEG Huffman tables per image (smaller files, slower) | false                      |
-| `--jpeg-restart-interval` | JPEG restart interval (MCUs, >0 enables DRI)                | 0 (disabled)               |
-| `-c, --compression` | PNG compression level (1-9)                                      | 6                          |
-| `--subsampling`     | JPEG chroma subsampling (`s444`, `s420`)                         | s444                       |
-| `--filter`          | PNG filter (`none`, `sub`, `up`, `average`, `paeth`, `minsum`, `entropy`, `bigrams`, `bigent`, `brute`, `adaptive`, `adaptive-fast`, `adaptive-sampled`) | adaptive                   |
-| `--png-preset`      | PNG preset (`fast`, `balanced`, `max`, `level0`..`level6`) | fast                      |
-| `--adaptive-sample-interval` | Rows between full adaptive evaluations when using `adaptive-sampled` | 4 |
-| `--png-optimize-alpha` | Zero color channels for fully transparent pixels (PNG)        | false                      |
-| `--png-reduce-color`   | Losslessly reduce color type when possible (PNG)              | false                      |
-| `--png-strip-metadata` | Strip ancillary text/time metadata chunks (PNG)               | false                      |
-| `--grayscale`       | Convert to grayscale                                             | false                      |
-| `-v, --verbose`     | Show detailed output                                             | false                      |
+| Option                       | Description                                                                                                                                              | Default                    |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `-o, --output`               | Output file path                                                                                                                                         | `<input>.compressed.<ext>` |
+| `-f, --format`               | Output format (`png`, `jpeg`, `jpg`)                                                                                                                     | Detected from extension    |
+| `-q, --quality`              | JPEG quality (1-100)                                                                                                                                     | 85                         |
+| `--jpeg-optimize-huffman`    | Optimize JPEG Huffman tables per image (smaller files, slower)                                                                                           | false                      |
+| `--jpeg-restart-interval`    | JPEG restart interval (MCUs, >0 enables DRI)                                                                                                             | 0 (disabled)               |
+| `-c, --compression`          | PNG compression level (1-9)                                                                                                                              | 6                          |
+| `--subsampling`              | JPEG chroma subsampling (`s444`, `s420`)                                                                                                                 | s444                       |
+| `--filter`                   | PNG filter (`none`, `sub`, `up`, `average`, `paeth`, `minsum`, `entropy`, `bigrams`, `bigent`, `brute`, `adaptive`, `adaptive-fast`, `adaptive-sampled`) | adaptive                   |
+| `--png-preset`               | PNG preset (`fast`, `balanced`, `max`, `level0`..`level6`)                                                                                               | fast                       |
+| `--adaptive-sample-interval` | Rows between full adaptive evaluations when using `adaptive-sampled`                                                                                     | 4                          |
+| `--png-optimize-alpha`       | Zero color channels for fully transparent pixels (PNG)                                                                                                   | false                      |
+| `--png-reduce-color`         | Losslessly reduce color type when possible (PNG)                                                                                                         | false                      |
+| `--png-strip-metadata`       | Strip ancillary text/time metadata chunks (PNG)                                                                                                          | false                      |
+| `--grayscale`                | Convert to grayscale                                                                                                                                     | false                      |
+| `-v, --verbose`              | Show detailed output                                                                                                                                     | false                      |
 
 ### Supported Color Types
 
@@ -286,22 +286,72 @@ Coverage highlights:
 
 Note: tests and benches are validated on nightly toolchain; ensure `rustup override set nightly` in this repo to align with CI/tooling.
 
+## WebAssembly (WASM)
+
+The library supports WebAssembly for browser and Node.js usage. The WASM build exposes a minimal 3-function API:
+
+```typescript
+encodePng(data, width, height, colorType, preset, lossy) → Uint8Array
+encodeJpeg(data, width, height, colorType, quality, preset, subsampling420) → Uint8Array
+bytesPerPixel(colorType) → number
+```
+
+### Building the WASM Module
+
+**Prerequisites:**
+
+- Rust with `wasm32-unknown-unknown` target
+- `wasm-bindgen-cli`
+
+```bash
+# Install the WASM target
+rustup target add wasm32-unknown-unknown
+
+# Install wasm-bindgen CLI
+cargo install wasm-bindgen-cli
+
+# Build the WASM module
+cargo build --target wasm32-unknown-unknown --release --features wasm
+
+# Generate JS bindings (output to web/src/lib/comprs-wasm/)
+wasm-bindgen --target web \
+  --out-dir web/src/lib/comprs-wasm \
+  --out-name comprs \
+  target/wasm32-unknown-unknown/release/comprs.wasm
+```
+
+**Troubleshooting (Homebrew + rustup):**
+
+If you have both Homebrew Rust and rustup installed, cargo may use the wrong compiler. Fix by explicitly setting the rustc path:
+
+```bash
+# Check which rustc is being used
+which rustc  # Should be ~/.cargo/bin/rustc for rustup
+
+# If Homebrew's rustc is used, explicitly set the correct one:
+RUSTC=~/.cargo/bin/rustc cargo build --target wasm32-unknown-unknown --release --features wasm
+```
+
 ## Optional Features
 
+- `wasm` - Build WebAssembly bindings (adds `wasm-bindgen`, `js-sys`)
 - `cli` - Build the command-line interface (adds `clap`, `png`, `jpeg-decoder`)
-- `simd` *(default)* - Enable SIMD optimizations with runtime feature detection (falls back to scalar paths when unavailable)
-- `parallel` *(default)* - Enable parallel processing with rayon
+- `simd` _(default)_ - Enable SIMD optimizations with runtime feature detection (falls back to scalar paths when unavailable)
+- `parallel` _(default)_ - Enable parallel processing with rayon
 
 ### Performance defaults (PNG)
+
 - Default compression level: **2** (favor speed)
 - Default filter strategy: **AdaptiveFast**, with height-aware sampling on tall images
 - SIMD + parallel enabled by default
 - Small inputs: prefer fixed Huffman (token thresholds tuned to avoid double encoding)
 
 Presets:
+
 - `PngOptions::fast()` — level 2, AdaptiveFast (default)
 - `PngOptions::balanced()` — level 6, Adaptive
 - `PngOptions::max_compression()` — level 9, AdaptiveSampled(interval=2)
+
 ## Performance Notes
 
 - PNG compression uses adaptive filter selection for best compression

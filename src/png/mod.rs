@@ -40,6 +40,40 @@ pub struct PngOptions {
     /// If true, use optimal (Zopfli-style) DEFLATE compression with iterative refinement.
     /// Much slower but produces smaller files. Recommended only for final distribution.
     pub optimal_compression: bool,
+    /// Palette quantization options (lossy compression for significant size reduction).
+    pub quantization: QuantizationOptions,
+}
+
+/// Quantization mode for lossy PNG compression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuantizationMode {
+    /// Disable palette quantization (lossless path).
+    Off,
+    /// Apply quantization when beneficial (auto-detect based on color count).
+    Auto,
+    /// Force quantization regardless of heuristics.
+    Force,
+}
+
+/// Options controlling palette quantization (lossy compression).
+#[derive(Debug, Clone)]
+pub struct QuantizationOptions {
+    /// Strategy: Off/Auto/Force.
+    pub mode: QuantizationMode,
+    /// Maximum palette size (1-256).
+    pub max_colors: u16,
+    /// Enable Floyd–Steinberg dithering (on RGB channels only).
+    pub dithering: bool,
+}
+
+impl Default for QuantizationOptions {
+    fn default() -> Self {
+        Self {
+            mode: QuantizationMode::Off,
+            max_colors: 256,
+            dithering: false,
+        }
+    }
 }
 
 impl Default for PngOptions {
@@ -55,6 +89,7 @@ impl Default for PngOptions {
             reduce_palette: false,
             verbose_filter_log: false,
             optimal_compression: false,
+            quantization: QuantizationOptions::default(),
         }
     }
 }
@@ -74,6 +109,7 @@ impl PngOptions {
             reduce_palette: false,
             verbose_filter_log: false,
             optimal_compression: false,
+            quantization: QuantizationOptions::default(),
         }
     }
 
@@ -92,6 +128,7 @@ impl PngOptions {
             reduce_palette: true,
             verbose_filter_log: false,
             optimal_compression: false,
+            quantization: QuantizationOptions::default(),
         }
     }
 
@@ -110,6 +147,7 @@ impl PngOptions {
             reduce_palette: true,
             verbose_filter_log: false,
             optimal_compression: true,
+            quantization: QuantizationOptions::default(),
         }
     }
 
@@ -120,6 +158,22 @@ impl PngOptions {
             2 => Self::max(),
             _ => Self::balanced(),
         }
+    }
+
+    /// Create from preset with lossless flag.
+    ///
+    /// When `lossless` is false, enables auto-quantization for potentially
+    /// significant size reduction (lossy compression).
+    pub fn from_preset_with_lossless(preset: u8, lossless: bool) -> Self {
+        let mut opts = Self::from_preset(preset);
+        if !lossless {
+            opts.quantization = QuantizationOptions {
+                mode: QuantizationMode::Auto,
+                max_colors: 256,
+                dithering: false,
+            };
+        }
+        opts
     }
 }
 
@@ -210,13 +264,57 @@ pub fn encode_into(
     }
 
     // Validate data length
-    let bytes_per_pixel = color_type.bytes_per_pixel();
-    let expected_len = width as usize * height as usize * bytes_per_pixel;
+    let bpp = color_type.bytes_per_pixel();
+    let expected_len = width as usize * height as usize * bpp;
     if data.len() != expected_len {
         return Err(Error::InvalidDataLength {
             expected: expected_len,
             actual: data.len(),
         });
+    }
+
+    // Check if quantization should be applied
+    let should_quantize = match options.quantization.mode {
+        QuantizationMode::Off => false,
+        QuantizationMode::Force => matches!(color_type, ColorType::Rgb | ColorType::Rgba),
+        QuantizationMode::Auto => {
+            matches!(color_type, ColorType::Rgb | ColorType::Rgba)
+                && should_quantize_auto(
+                    data,
+                    bpp,
+                    options.quantization.max_colors.min(256) as usize,
+                )
+        }
+    };
+
+    // Quantization path: convert to indexed PNG
+    if should_quantize {
+        let (palette_rgba, indices) = quantize_image(
+            data,
+            width,
+            height,
+            color_type,
+            options.quantization.max_colors.min(256) as usize,
+            options.quantization.dithering,
+        )?;
+
+        // Build PLTE and optional tRNS
+        let plte: Vec<[u8; 3]> = palette_rgba
+            .iter()
+            .map(|[r, g, b, _]| [*r, *g, *b])
+            .collect();
+        let alpha: Vec<u8> = palette_rgba.iter().map(|[_, _, _, a]| *a).collect();
+        let alpha = maybe_trim_transparency(&alpha);
+
+        return encode_indexed_into(
+            output,
+            &indices,
+            width,
+            height,
+            &plte,
+            alpha.as_deref(),
+            options,
+        );
     }
 
     output.clear();
@@ -622,29 +720,53 @@ fn build_palette(
         ColorType::Rgb | ColorType::Rgba => {}
         _ => return None,
     }
-    use std::collections::HashMap;
-    let mut map: HashMap<[u8; 4], u8> = HashMap::with_capacity(256);
-    let mut palette: Vec<[u8; 4]> = Vec::new();
-    let mut indexed = Vec::with_capacity(width * height);
 
     let stride = color_type.bytes_per_pixel();
+    let pixel_count = width * height;
+
+    // First pass: collect all colors as u32 keys, sort, and deduplicate
+    // This avoids HashMap overhead in WASM builds
+    let mut keys: Vec<u32> = Vec::with_capacity(pixel_count);
     for chunk in data.chunks_exact(stride) {
-        let entry = match color_type {
-            ColorType::Rgb => [chunk[0], chunk[1], chunk[2], 255],
-            ColorType::Rgba => [chunk[0], chunk[1], chunk[2], chunk[3]],
+        let key = match color_type {
+            ColorType::Rgb => {
+                ((chunk[0] as u32) << 24)
+                    | ((chunk[1] as u32) << 16)
+                    | ((chunk[2] as u32) << 8)
+                    | 255
+            }
+            ColorType::Rgba => {
+                ((chunk[0] as u32) << 24)
+                    | ((chunk[1] as u32) << 16)
+                    | ((chunk[2] as u32) << 8)
+                    | chunk[3] as u32
+            }
             _ => unreachable!(),
         };
-        if let Some(&idx) = map.get(&entry) {
-            indexed.push(idx);
-        } else {
-            if palette.len() == 256 {
-                return None;
-            }
-            let idx = palette.len() as u8;
-            palette.push(entry);
-            map.insert(entry, idx);
-            indexed.push(idx);
-        }
+        keys.push(key);
+    }
+
+    // Build sorted unique palette
+    let mut sorted_keys = keys.clone();
+    sorted_keys.sort_unstable();
+    sorted_keys.dedup();
+
+    // Check if within palette limit
+    if sorted_keys.len() > 256 {
+        return None;
+    }
+
+    // Build palette from unique keys
+    let palette: Vec<[u8; 4]> = sorted_keys
+        .iter()
+        .map(|&k| [(k >> 24) as u8, (k >> 16) as u8, (k >> 8) as u8, k as u8])
+        .collect();
+
+    // Second pass: map each pixel to its palette index using binary search
+    let mut indexed = Vec::with_capacity(pixel_count);
+    for &key in &keys {
+        let idx = sorted_keys.binary_search(&key).unwrap() as u8;
+        indexed.push(idx);
     }
 
     // Apply Zeng palette sorting for better compression
@@ -897,6 +1019,649 @@ fn analyze_rgba(data: &[u8]) -> (bool, bool) {
         }
     }
     (all_opaque, all_gray)
+}
+
+// ============================================================================
+// Quantization (lossy compression)
+// ============================================================================
+
+#[derive(Clone)]
+struct ColorCount {
+    rgba: [u8; 4],
+    count: u32,
+}
+
+#[derive(Clone)]
+struct ColorBox {
+    colors: Vec<ColorCount>,
+    r_min: u8,
+    r_max: u8,
+    g_min: u8,
+    g_max: u8,
+    b_min: u8,
+    b_max: u8,
+    a_min: u8,
+    a_max: u8,
+}
+
+impl ColorBox {
+    fn from_colors(colors: Vec<ColorCount>) -> Self {
+        let mut r_min = 255;
+        let mut r_max = 0;
+        let mut g_min = 255;
+        let mut g_max = 0;
+        let mut b_min = 255;
+        let mut b_max = 0;
+        let mut a_min = 255;
+        let mut a_max = 0;
+        for c in &colors {
+            let [r, g, b, a] = c.rgba;
+            r_min = r_min.min(r);
+            r_max = r_max.max(r);
+            g_min = g_min.min(g);
+            g_max = g_max.max(g);
+            b_min = b_min.min(b);
+            b_max = b_max.max(b);
+            a_min = a_min.min(a);
+            a_max = a_max.max(a);
+        }
+        Self {
+            colors,
+            r_min,
+            r_max,
+            g_min,
+            g_max,
+            b_min,
+            b_max,
+            a_min,
+            a_max,
+        }
+    }
+
+    fn range(&self) -> (u8, u8) {
+        let r_range = self.r_max - self.r_min;
+        let g_range = self.g_max - self.g_min;
+        let b_range = self.b_max - self.b_min;
+        let a_range = self.a_max - self.a_min;
+        let mut max_range = r_range;
+        let mut channel = 0u8;
+        if g_range > max_range {
+            max_range = g_range;
+            channel = 1;
+        }
+        if b_range > max_range {
+            max_range = b_range;
+            channel = 2;
+        }
+        if a_range > max_range {
+            max_range = a_range;
+            channel = 3;
+        }
+        (channel, max_range)
+    }
+
+    fn can_split(&self) -> bool {
+        self.colors.len() > 1
+    }
+
+    fn split(self) -> (ColorBox, ColorBox) {
+        let (channel, _) = self.range();
+        let mut colors = self.colors;
+        colors.sort_by_key(|c| match channel {
+            0 => c.rgba[0],
+            1 => c.rgba[1],
+            2 => c.rgba[2],
+            _ => c.rgba[3],
+        });
+
+        let total: u32 = colors.iter().map(|c| c.count).sum();
+        let mut acc = 0;
+        let mut split_idx = 0;
+        for (i, c) in colors.iter().enumerate() {
+            acc += c.count;
+            if acc >= total / 2 {
+                split_idx = i;
+                break;
+            }
+        }
+        // Ensure both halves are non-empty by clamping split_idx
+        // to [0, len-2] range (so right side always has at least 1)
+        let max_split = colors.len().saturating_sub(2);
+        split_idx = split_idx.min(max_split);
+
+        let left = colors[..=split_idx].to_vec();
+        let right = colors[split_idx + 1..].to_vec();
+        (ColorBox::from_colors(left), ColorBox::from_colors(right))
+    }
+
+    fn make_palette_entry(&self) -> [u8; 4] {
+        let mut r_sum: u64 = 0;
+        let mut g_sum: u64 = 0;
+        let mut b_sum: u64 = 0;
+        let mut a_sum: u64 = 0;
+        let mut total: u64 = 0;
+        for c in &self.colors {
+            let cnt = c.count as u64;
+            let [r, g, b, a] = c.rgba;
+            r_sum += r as u64 * cnt;
+            g_sum += g as u64 * cnt;
+            b_sum += b as u64 * cnt;
+            a_sum += a as u64 * cnt;
+            total += cnt;
+        }
+        if total == 0 {
+            return [0, 0, 0, 255];
+        }
+        [
+            (r_sum / total) as u8,
+            (g_sum / total) as u8,
+            (b_sum / total) as u8,
+            (a_sum / total) as u8,
+        ]
+    }
+}
+
+fn median_cut_palette(colors: Vec<ColorCount>, max_colors: usize) -> Vec<[u8; 4]> {
+    if colors.is_empty() {
+        return vec![[0, 0, 0, 255]];
+    }
+    let mut boxes = vec![ColorBox::from_colors(colors)];
+    while boxes.len() < max_colors {
+        // pick box with largest range
+        let (idx, _) = boxes
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, b)| {
+                let (_, r) = b.range();
+                r
+            })
+            .unwrap();
+        if !boxes[idx].can_split() {
+            break;
+        }
+        let b = boxes.remove(idx);
+        let (l, r) = b.split();
+        if !l.colors.is_empty() {
+            boxes.push(l);
+        }
+        if !r.colors.is_empty() {
+            boxes.push(r);
+        }
+    }
+
+    boxes.into_iter().map(|b| b.make_palette_entry()).collect()
+}
+
+fn nearest_palette_index(color: [u8; 4], palette: &[[u8; 4]]) -> u8 {
+    let mut best_idx = 0u8;
+    let mut best_dist = u32::MAX;
+    for (i, p) in palette.iter().enumerate() {
+        let dr = color[0] as i32 - p[0] as i32;
+        let dg = color[1] as i32 - p[1] as i32;
+        let db = color[2] as i32 - p[2] as i32;
+        let da = color[3] as i32 - p[3] as i32;
+        let dist = (dr * dr + dg * dg + db * db + da * da) as u32;
+        if dist < best_dist {
+            best_dist = dist;
+            best_idx = i as u8;
+        }
+    }
+    best_idx
+}
+
+/// Precomputed lookup table for fast nearest-palette-index queries.
+/// Uses 5-5-5 RGB quantization (32K entries) for O(1) lookups.
+/// For colors with alpha < 255, falls back to direct computation.
+struct PaletteLut {
+    /// LUT for opaque colors: index = (r5 << 10) | (g5 << 5) | b5
+    opaque_lut: Vec<u8>,
+    /// Reference to the palette for transparent color lookups
+    palette: Vec<[u8; 4]>,
+}
+
+impl PaletteLut {
+    /// Build a lookup table for the given palette.
+    fn new(palette: Vec<[u8; 4]>) -> Self {
+        // Build 5-5-5 RGB LUT for opaque colors (32K entries)
+        // Each 8-bit channel is reduced to 5 bits by taking top 5 bits
+        let mut opaque_lut = vec![0u8; 32 * 32 * 32];
+
+        for r5 in 0..32u8 {
+            for g5 in 0..32u8 {
+                for b5 in 0..32u8 {
+                    // Convert 5-bit back to 8-bit (expand to full range)
+                    let r8 = (r5 << 3) | (r5 >> 2);
+                    let g8 = (g5 << 3) | (g5 >> 2);
+                    let b8 = (b5 << 3) | (b5 >> 2);
+
+                    let idx = nearest_palette_index([r8, g8, b8, 255], &palette);
+                    let lut_idx = ((r5 as usize) << 10) | ((g5 as usize) << 5) | (b5 as usize);
+                    opaque_lut[lut_idx] = idx;
+                }
+            }
+        }
+
+        Self {
+            opaque_lut,
+            palette,
+        }
+    }
+
+    /// Fast lookup of nearest palette index.
+    #[inline]
+    fn lookup(&self, r: u8, g: u8, b: u8, a: u8) -> u8 {
+        if a == 255 {
+            // Use precomputed LUT for opaque colors (most common case)
+            let r5 = r >> 3;
+            let g5 = g >> 3;
+            let b5 = b >> 3;
+            let lut_idx = ((r5 as usize) << 10) | ((g5 as usize) << 5) | (b5 as usize);
+            self.opaque_lut[lut_idx]
+        } else {
+            // For transparent colors, compute directly (rare case)
+            nearest_palette_index([r, g, b, a], &self.palette)
+        }
+    }
+}
+
+/// Quantize an RGB or RGBA image to a palette using median-cut algorithm.
+///
+/// Returns the palette (up to `max_colors` entries) and indexed pixel data.
+fn quantize_image(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    color_type: ColorType,
+    max_colors: usize,
+    dithering: bool,
+) -> Result<(Vec<[u8; 4]>, Vec<u8>)> {
+    let bpp = color_type.bytes_per_pixel();
+    if bpp != 3 && bpp != 4 {
+        return Err(Error::UnsupportedColorType);
+    }
+
+    // Build color histogram with sampling for large images.
+    // Uses Vec + sort + run-length counting to avoid HashMap overhead in WASM.
+    let total_pixels = data.len() / bpp;
+    let max_samples = 50_000usize;
+    let stride = (total_pixels / max_samples).max(1);
+
+    // Collect sampled color keys
+    let mut keys = Vec::with_capacity(max_samples.min(total_pixels / stride + 1));
+    let mut idx = 0usize;
+    while idx + bpp <= data.len() {
+        let chunk = &data[idx..idx + bpp];
+        let key = match (bpp, chunk) {
+            (3, [r, g, b]) => ((*r as u32) << 24) | ((*g as u32) << 16) | ((*b as u32) << 8) | 255,
+            (4, [r, g, b, a]) => {
+                ((*r as u32) << 24) | ((*g as u32) << 16) | ((*b as u32) << 8) | *a as u32
+            }
+            _ => unreachable!(),
+        };
+        keys.push(key);
+        idx = idx.saturating_add(stride * bpp);
+    }
+
+    // Sort and build histogram via run-length counting
+    keys.sort_unstable();
+    let mut colors: Vec<ColorCount> = Vec::with_capacity(keys.len().min(8192));
+    if !keys.is_empty() {
+        let mut prev_key = keys[0];
+        let mut count = stride as u32;
+        for &key in keys.iter().skip(1) {
+            if key == prev_key {
+                count = count.saturating_add(stride as u32);
+            } else {
+                colors.push(ColorCount {
+                    rgba: [
+                        (prev_key >> 24) as u8,
+                        (prev_key >> 16) as u8,
+                        (prev_key >> 8) as u8,
+                        prev_key as u8,
+                    ],
+                    count,
+                });
+                prev_key = key;
+                count = stride as u32;
+            }
+        }
+        // Push final color
+        colors.push(ColorCount {
+            rgba: [
+                (prev_key >> 24) as u8,
+                (prev_key >> 16) as u8,
+                (prev_key >> 8) as u8,
+                prev_key as u8,
+            ],
+            count,
+        });
+    }
+
+    // If too many colors, keep only the most frequent ones for median-cut
+    let max_histogram_colors = 8192usize;
+    if colors.len() > max_histogram_colors {
+        colors.sort_unstable_by(|a, b| b.count.cmp(&a.count));
+        colors.truncate(max_histogram_colors);
+    }
+
+    // Early out: already within palette size
+    if colors.len() <= max_colors {
+        let palette: Vec<[u8; 4]> = colors.iter().map(|c| c.rgba).collect();
+        // Build sorted lookup table for O(log n) color->index mapping
+        let mut sorted_palette: Vec<(u32, u8)> = palette
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let key = ((c[0] as u32) << 24)
+                    | ((c[1] as u32) << 16)
+                    | ((c[2] as u32) << 8)
+                    | c[3] as u32;
+                (key, i as u8)
+            })
+            .collect();
+        sorted_palette.sort_unstable_by_key(|(k, _)| *k);
+
+        let mut indices = Vec::with_capacity(width as usize * height as usize);
+        for chunk in data.chunks_exact(bpp) {
+            let (r, g, b, a) = match (bpp, chunk) {
+                (3, [r, g, b]) => (*r, *g, *b, 255u8),
+                (4, [r, g, b, a]) => (*r, *g, *b, *a),
+                _ => unreachable!(),
+            };
+            let key = ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | a as u32;
+            let idx = sorted_palette
+                .binary_search_by_key(&key, |(k, _)| *k)
+                .map(|i| sorted_palette[i].1)
+                .unwrap_or_else(|_| nearest_palette_index([r, g, b, a], &palette));
+            indices.push(idx);
+        }
+        return Ok((palette, indices));
+    }
+
+    let palette = median_cut_palette(colors, max_colors);
+
+    // Build fast lookup table for nearest palette index queries
+    let lut = PaletteLut::new(palette.clone());
+
+    if !dithering {
+        let mut indices = Vec::with_capacity(width as usize * height as usize);
+        for chunk in data.chunks_exact(bpp) {
+            let (r, g, b, a) = match (bpp, chunk) {
+                (3, [r, g, b]) => (*r, *g, *b, 255u8),
+                (4, [r, g, b, a]) => (*r, *g, *b, *a),
+                _ => unreachable!(),
+            };
+            indices.push(lut.lookup(r, g, b, a));
+        }
+        return Ok((palette, indices));
+    }
+
+    // Floyd–Steinberg dithering on RGB (alpha preserved)
+    // Uses PaletteLut for O(1) nearest-color lookups instead of O(256) linear search.
+    let width_usize = width as usize;
+    let mut indices = Vec::with_capacity(width as usize * height as usize);
+    let mut err_r = vec![0f32; width_usize + 2];
+    let mut err_g = vec![0f32; width_usize + 2];
+    let mut err_b = vec![0f32; width_usize + 2];
+    let mut next_err_r = vec![0f32; width_usize + 2];
+    let mut next_err_g = vec![0f32; width_usize + 2];
+    let mut next_err_b = vec![0f32; width_usize + 2];
+
+    let mut pos = 0;
+    for _y in 0..height as usize {
+        for x in 0..width_usize {
+            let (r, g, b, a) = if bpp == 3 {
+                let r = data[pos];
+                let g = data[pos + 1];
+                let b = data[pos + 2];
+                (r, g, b, 255u8)
+            } else {
+                let r = data[pos];
+                let g = data[pos + 1];
+                let b = data[pos + 2];
+                let a = data[pos + 3];
+                (r, g, b, a)
+            };
+            pos += bpp;
+
+            let adj_r = (r as f32 + err_r[x + 1]).clamp(0.0, 255.0) as u8;
+            let adj_g = (g as f32 + err_g[x + 1]).clamp(0.0, 255.0) as u8;
+            let adj_b = (b as f32 + err_b[x + 1]).clamp(0.0, 255.0) as u8;
+
+            // O(1) lookup using precomputed LUT
+            let idx = lut.lookup(adj_r, adj_g, adj_b, a);
+
+            indices.push(idx);
+            let p = palette[idx as usize];
+            let er = adj_r as f32 - p[0] as f32;
+            let eg = adj_g as f32 - p[1] as f32;
+            let eb = adj_b as f32 - p[2] as f32;
+
+            // Distribute error: * 7 / 3 5 1 (Floyd-Steinberg)
+            err_r[x + 2] += er * 7.0 / 16.0;
+            err_g[x + 2] += eg * 7.0 / 16.0;
+            err_b[x + 2] += eb * 7.0 / 16.0;
+
+            next_err_r[x] += er * 3.0 / 16.0;
+            next_err_g[x] += eg * 3.0 / 16.0;
+            next_err_b[x] += eb * 3.0 / 16.0;
+
+            next_err_r[x + 1] += er * 5.0 / 16.0;
+            next_err_g[x + 1] += eg * 5.0 / 16.0;
+            next_err_b[x + 1] += eb * 5.0 / 16.0;
+
+            next_err_r[x + 2] += er * 1.0 / 16.0;
+            next_err_g[x + 2] += eg * 1.0 / 16.0;
+            next_err_b[x + 2] += eb * 1.0 / 16.0;
+        }
+        err_r.fill(0.0);
+        err_g.fill(0.0);
+        err_b.fill(0.0);
+        std::mem::swap(&mut err_r, &mut next_err_r);
+        std::mem::swap(&mut err_g, &mut next_err_g);
+        std::mem::swap(&mut err_b, &mut next_err_b);
+    }
+
+    Ok((palette, indices))
+}
+
+/// Heuristic to determine if auto-quantization should be applied.
+///
+/// Samples pixels to estimate color diversity. Returns true if the image
+/// has a moderate number of colors (more than max_colors but not too many,
+/// indicating it's not a photo).
+fn should_quantize_auto(data: &[u8], bpp: usize, max_colors: usize) -> bool {
+    let total_pixels = data.len() / bpp;
+    if total_pixels == 0 {
+        return false;
+    }
+    let sample_cap = 20_000usize;
+    let stride = (total_pixels / sample_cap).max(1);
+    let threshold = max_colors.saturating_mul(32);
+
+    // Collect sampled color keys into a Vec, then sort and deduplicate
+    // This avoids pulling in HashMap/HashSet which adds significant WASM size
+    let mut keys = Vec::with_capacity(sample_cap.min(total_pixels / stride + 1));
+    let mut idx = 0usize;
+    while idx + bpp <= data.len() {
+        let key = match bpp {
+            3 => {
+                let r = data[idx];
+                let g = data[idx + 1];
+                let b = data[idx + 2];
+                ((r as u32) << 16) | ((g as u32) << 8) | b as u32
+            }
+            4 => {
+                let r = data[idx];
+                let g = data[idx + 1];
+                let b = data[idx + 2];
+                let a = data[idx + 3];
+                ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | a as u32
+            }
+            _ => return false,
+        };
+        keys.push(key);
+        idx = idx.saturating_add(stride * bpp);
+    }
+
+    // Sort and count unique values
+    keys.sort_unstable();
+    let unique = if keys.is_empty() {
+        0
+    } else {
+        let mut count = 1;
+        for i in 1..keys.len() {
+            if keys[i] != keys[i - 1] {
+                count += 1;
+                if count > threshold {
+                    // Too many distinct colors; likely a photo—skip auto quantization
+                    return false;
+                }
+            }
+        }
+        count
+    };
+
+    // Only quantize if we have more colors than palette size but not too many
+    unique > max_colors && unique <= threshold
+}
+
+/// Encode indexed (palette) pixel data as PNG.
+///
+/// The `data` slice contains palette indices (0..palette.len()). The palette
+/// must contain between 1 and 256 entries. Optional `transparency` supplies
+/// per-entry alpha values (tRNS); its length must not exceed the palette
+/// length. Bit depth is fixed to 8 for indexed output.
+pub fn encode_indexed(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    palette: &[[u8; 3]],
+    transparency: Option<&[u8]>,
+) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    encode_indexed_into(
+        &mut output,
+        data,
+        width,
+        height,
+        palette,
+        transparency,
+        &PngOptions::default(),
+    )?;
+    Ok(output)
+}
+
+/// Encode indexed (palette) pixel data as PNG with custom options.
+pub fn encode_indexed_with_options(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    palette: &[[u8; 3]],
+    transparency: Option<&[u8]>,
+    options: &PngOptions,
+) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    encode_indexed_into(
+        &mut output,
+        data,
+        width,
+        height,
+        palette,
+        transparency,
+        options,
+    )?;
+    Ok(output)
+}
+
+/// Encode indexed (palette) pixel data into a caller-provided buffer.
+pub fn encode_indexed_into(
+    output: &mut Vec<u8>,
+    data: &[u8],
+    width: u32,
+    height: u32,
+    palette: &[[u8; 3]],
+    transparency: Option<&[u8]>,
+    options: &PngOptions,
+) -> Result<()> {
+    let palette_len = palette.len();
+    if palette_len == 0 || palette_len > 256 {
+        return Err(Error::CompressionError(format!(
+            "Invalid palette length: {palette_len} (must be 1-256)"
+        )));
+    }
+    if let Some(alpha) = transparency {
+        if alpha.len() > palette_len {
+            return Err(Error::CompressionError(format!(
+                "Transparency length {} exceeds palette length {}",
+                alpha.len(),
+                palette_len
+            )));
+        }
+    }
+
+    let expected_len = width as usize * height as usize;
+    if data.len() != expected_len {
+        return Err(Error::InvalidDataLength {
+            expected: expected_len,
+            actual: data.len(),
+        });
+    }
+
+    output.clear();
+    output.reserve(expected_len / 2 + 2048);
+
+    // Write signature and IHDR (color type 3, bit depth 8)
+    output.extend_from_slice(&PNG_SIGNATURE);
+    write_ihdr(output, width, height, 8, 3);
+
+    // Write PLTE chunk
+    let mut plte_data = Vec::with_capacity(palette_len * 3);
+    for entry in palette {
+        plte_data.extend_from_slice(entry);
+    }
+    chunk::write_chunk(output, b"PLTE", &plte_data);
+
+    // Write tRNS chunk if transparency provided
+    if let Some(alpha) = transparency {
+        chunk::write_chunk(output, b"tRNS", alpha);
+    }
+
+    // Palette-aware filtering: prefer None/Sub for indexed data
+    let mut palette_options = options.clone();
+    palette_options.filter_strategy = match options.filter_strategy {
+        FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast | FilterStrategy::MinSum => {
+            FilterStrategy::None
+        }
+        other => other,
+    };
+
+    let filtered = filter::apply_filters(data, width, height, 1, &palette_options);
+    let compressed = if palette_options.optimal_compression {
+        deflate_optimal_zlib(&filtered, 5)
+    } else {
+        deflate_zlib_packed(&filtered, palette_options.compression_level)
+    };
+
+    write_idat_chunks(output, &compressed);
+    write_iend(output);
+    Ok(())
+}
+
+fn maybe_trim_transparency(alpha: &[u8]) -> Option<Vec<u8>> {
+    if alpha.is_empty() {
+        return None;
+    }
+    if alpha.iter().all(|&a| a == 255) {
+        return None;
+    }
+    let mut last = 0usize;
+    for (i, &a) in alpha.iter().enumerate() {
+        if a != 255 {
+            last = i;
+        }
+    }
+    Some(alpha[..=last].to_vec())
 }
 
 /// Strip non-critical ancillary chunks to reduce output size.
@@ -1179,5 +1944,297 @@ mod tests {
         let png = encode(&pixels, 2, 2, ColorType::Gray).unwrap();
 
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
+    }
+
+    #[test]
+    fn test_quantization_force() {
+        // Image with more than 256 distinct colors - force quantization
+        let mut pixels = Vec::with_capacity(512 * 3);
+        for i in 0..512 {
+            pixels.push((i % 256) as u8);
+            pixels.push(((i / 2) % 256) as u8);
+            pixels.push(((i * 3) % 256) as u8);
+        }
+
+        let opts = PngOptions {
+            quantization: QuantizationOptions {
+                mode: QuantizationMode::Force,
+                max_colors: 256,
+                dithering: false,
+            },
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 16, 32, ColorType::Rgb, &opts).unwrap();
+
+        // Should produce indexed PNG (color type 3)
+        assert_eq!(png[25], 3);
+        // Should have PLTE chunk
+        assert!(png.windows(4).any(|w| w == b"PLTE"));
+        // Should be valid PNG
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+    }
+
+    #[test]
+    fn test_quantization_off() {
+        // Same image but with quantization off - should stay RGB
+        let mut pixels = Vec::with_capacity(512 * 3);
+        for i in 0..512 {
+            pixels.push((i % 256) as u8);
+            pixels.push(((i / 2) % 256) as u8);
+            pixels.push(((i * 3) % 256) as u8);
+        }
+
+        let opts = PngOptions {
+            quantization: QuantizationOptions {
+                mode: QuantizationMode::Off,
+                max_colors: 256,
+                dithering: false,
+            },
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 16, 32, ColorType::Rgb, &opts).unwrap();
+
+        // Should stay as RGB (color type 2)
+        assert_eq!(png[25], 2);
+        // Should NOT have PLTE chunk
+        assert!(!png.windows(4).any(|w| w == b"PLTE"));
+    }
+
+    #[test]
+    fn test_from_preset_with_lossless() {
+        // Lossless = true should have quantization off
+        let lossless = PngOptions::from_preset_with_lossless(1, true);
+        assert_eq!(lossless.quantization.mode, QuantizationMode::Off);
+
+        // Lossless = false should have quantization auto
+        let lossy = PngOptions::from_preset_with_lossless(1, false);
+        assert_eq!(lossy.quantization.mode, QuantizationMode::Auto);
+    }
+
+    #[test]
+    fn test_quantization_rgba_with_transparency() {
+        // RGBA image with varying transparency - force quantization
+        let mut pixels = Vec::with_capacity(256 * 4);
+        for i in 0..256 {
+            pixels.push((i % 256) as u8); // R
+            pixels.push(((i * 2) % 256) as u8); // G
+            pixels.push(((i * 3) % 256) as u8); // B
+            pixels.push(if i % 4 == 0 { 128 } else { 255 }); // A - some transparent
+        }
+
+        let opts = PngOptions {
+            quantization: QuantizationOptions {
+                mode: QuantizationMode::Force,
+                max_colors: 256,
+                dithering: false,
+            },
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 16, 16, ColorType::Rgba, &opts).unwrap();
+
+        // Should produce indexed PNG (color type 3)
+        assert_eq!(png[25], 3);
+        // Should have PLTE chunk
+        assert!(png.windows(4).any(|w| w == b"PLTE"));
+        // Should have tRNS chunk for transparency
+        assert!(png.windows(4).any(|w| w == b"tRNS"));
+        // Should be valid PNG
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+    }
+
+    #[test]
+    fn test_quantization_with_dithering() {
+        // Create a gradient image that will benefit from dithering
+        let mut pixels = Vec::with_capacity(64 * 64 * 3);
+        for y in 0..64 {
+            for x in 0..64 {
+                pixels.push((x * 4) as u8); // R gradient
+                pixels.push((y * 4) as u8); // G gradient
+                pixels.push(128); // B constant
+            }
+        }
+
+        let opts = PngOptions {
+            quantization: QuantizationOptions {
+                mode: QuantizationMode::Force,
+                max_colors: 64, // Limited palette to force dithering to matter
+                dithering: true,
+            },
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+
+        // Should produce indexed PNG
+        assert_eq!(png[25], 3);
+        assert!(png.windows(4).any(|w| w == b"PLTE"));
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+    }
+
+    #[test]
+    fn test_quantization_auto_mode_few_colors() {
+        // Image with exactly 32 colors - auto should NOT quantize (already within limit)
+        // Using 32 colors ensures 8-bit depth to avoid bit-packing issues
+        let mut pixels = Vec::with_capacity(64 * 64 * 3);
+        for i in 0..(64 * 64) {
+            let color_idx = i % 32;
+            pixels.push((color_idx * 8) as u8);
+            pixels.push((color_idx * 4) as u8);
+            pixels.push((color_idx * 2) as u8);
+        }
+
+        let opts = PngOptions {
+            quantization: QuantizationOptions {
+                mode: QuantizationMode::Auto,
+                max_colors: 256,
+                dithering: false,
+            },
+            reduce_palette: true, // Enable lossless palette reduction
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+
+        // Should still create palette (via lossless reduction, not quantization)
+        // The key is that it uses the exact colors, not quantized approximations
+        assert_eq!(png[25], 3);
+        assert!(png.windows(4).any(|w| w == b"PLTE"));
+    }
+
+    #[test]
+    fn test_quantization_produces_indexed_output() {
+        // Create an image with >256 distinct colors (so lossless can't palette reduce)
+        let mut pixels = Vec::with_capacity(32 * 32 * 3);
+        for y in 0..32 {
+            for x in 0..32 {
+                // Each pixel is unique: R = x*8, G = y*8, B = (x+y)*4
+                let r = (x * 8) as u8;
+                let g = (y * 8) as u8;
+                let b = ((x + y) * 4) as u8;
+                pixels.push(r);
+                pixels.push(g);
+                pixels.push(b);
+            }
+        }
+
+        // Encode lossless without palette reduction (to get true RGB output)
+        let lossless_opts = PngOptions {
+            quantization: QuantizationOptions {
+                mode: QuantizationMode::Off,
+                max_colors: 256,
+                dithering: false,
+            },
+            reduce_palette: false, // Don't reduce to palette
+            reduce_color_type: false,
+            ..PngOptions::fast()
+        };
+        let lossless =
+            encode_with_options(&pixels, 32, 32, ColorType::Rgb, &lossless_opts).unwrap();
+
+        // Encode lossy with forced quantization
+        let lossy_opts = PngOptions {
+            quantization: QuantizationOptions {
+                mode: QuantizationMode::Force,
+                max_colors: 256,
+                dithering: false,
+            },
+            reduce_palette: false,
+            reduce_color_type: false,
+            ..PngOptions::fast()
+        };
+        let lossy = encode_with_options(&pixels, 32, 32, ColorType::Rgb, &lossy_opts).unwrap();
+
+        // Lossless should be RGB (color type 2), lossy should be indexed (color type 3)
+        assert_eq!(lossless[25], 2, "Lossless should be RGB (color type 2)");
+        assert_eq!(lossy[25], 3, "Lossy should be indexed (color type 3)");
+        assert!(
+            lossy.windows(4).any(|w| w == b"PLTE"),
+            "Lossy should have PLTE chunk"
+        );
+    }
+
+    #[test]
+    fn test_quantization_max_colors_limit() {
+        // Test that max_colors is respected
+        let mut pixels = Vec::with_capacity(256 * 3);
+        for i in 0..256 {
+            pixels.push(i as u8);
+            pixels.push((i * 2) as u8);
+            pixels.push((i * 3) as u8);
+        }
+
+        let opts = PngOptions {
+            quantization: QuantizationOptions {
+                mode: QuantizationMode::Force,
+                max_colors: 16, // Only allow 16 colors
+                dithering: false,
+            },
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 16, 16, ColorType::Rgb, &opts).unwrap();
+
+        // Should produce indexed PNG
+        assert_eq!(png[25], 3);
+
+        // Find PLTE chunk and verify its size
+        let plte_pos = png.windows(4).position(|w| w == b"PLTE").unwrap();
+        // PLTE chunk: length(4) + "PLTE"(4) + data(n*3) + CRC(4)
+        // Length is at plte_pos - 4
+        let plte_len = u32::from_be_bytes([
+            png[plte_pos - 4],
+            png[plte_pos - 3],
+            png[plte_pos - 2],
+            png[plte_pos - 1],
+        ]) as usize;
+
+        // Palette should have at most 16 colors * 3 bytes = 48 bytes
+        assert!(
+            plte_len <= 48,
+            "PLTE length {plte_len} should be <= 48 (16 colors * 3 bytes)"
+        );
+    }
+
+    #[test]
+    fn test_lossless_palette_uses_binary_search() {
+        // Test that the lossless palette path (build_palette) works correctly
+        // This exercises the Vec + binary search approach we use instead of HashMap
+        // Use 64x64 image (4096 pixels) with 20 distinct colors (>16 to force 8-bit depth)
+        let mut pixels = Vec::with_capacity(64 * 64 * 4);
+        for i in 0..(64 * 64) {
+            let color_idx = i % 20;
+            pixels.push((color_idx * 12) as u8); // R
+            pixels.push((color_idx * 10) as u8); // G
+            pixels.push((color_idx * 8) as u8); // B
+            pixels.push(255); // A (opaque)
+        }
+
+        let opts = PngOptions {
+            reduce_palette: true,
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgba, &opts).unwrap();
+
+        // Should produce indexed PNG with palette
+        assert_eq!(png[25], 3);
+        assert!(png.windows(4).any(|w| w == b"PLTE"));
+
+        // Find PLTE and verify it has 20 colors (60 bytes)
+        let plte_pos = png.windows(4).position(|w| w == b"PLTE").unwrap();
+        let plte_len = u32::from_be_bytes([
+            png[plte_pos - 4],
+            png[plte_pos - 3],
+            png[plte_pos - 2],
+            png[plte_pos - 1],
+        ]) as usize;
+
+        assert_eq!(
+            plte_len, 60,
+            "PLTE should have exactly 20 colors (60 bytes)"
+        );
     }
 }

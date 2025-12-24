@@ -39,10 +39,10 @@ struct Args {
     /// Optimize JPEG Huffman tables (smaller files, slower)
     #[arg(long, default_value_t = false)]
     jpeg_optimize_huffman: bool,
-    /// JPEG restart interval in MCUs (1-65535). Use to improve error resilience.
+    /// JPEG restart interval in MCUs (0 to disable, 1-65535 to enable). Use to improve error resilience.
     #[arg(
         long,
-        value_parser = clap::value_parser!(u16).range(1..=65535),
+        value_parser = clap::value_parser!(u16).range(0..=65535),
         default_value = "0"
     )]
     jpeg_restart_interval: u16,
@@ -482,6 +482,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     reduce_palette: args.png_reduce_color,
                     verbose_filter_log: args.verbose,
                     optimal_compression: false,
+                    quantization: comprs::png::QuantizationOptions::default(),
                 },
             };
             // Allow explicit overrides if preset is provided but user also set flags.
@@ -542,7 +543,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 &pixels,
                 width,
                 height,
-                args.quality,
                 color_type,
                 &options,
             )?
