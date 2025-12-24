@@ -41,7 +41,7 @@ Comparing comprs presets against oxipng and the image crate. All columns show **
 | squoosh_example_palette.png | 800×600    | 268,636 / 48ms   | 147,626 / 45ms   | 144,855 / 2.8s  | 104,206 / 0.9s   | ~180KB / 50ms | +39.0%          |
 | rocket.png                  | 800×600    | 1,716,340 / 0.1s | 1,390,853 / 0.2s | 1,379,515 / 15s | 1,280,518 / 1.2s | ~1.5MB / 0.2s | +7.7%           |
 
-### PNG Preset Summary
+### PNG Preset Summary (measured on listed fixtures/hardware/toolchain)
 
 | Preset       | Avg Size vs oxipng | Speed Characteristic       | Best For                   |
 | ------------ | ------------------ | -------------------------- | -------------------------- |
@@ -147,11 +147,11 @@ Comparing comprs presets against mozjpeg and the image crate. All columns show *
 
 ## 4. WASM Binary Size Comparison
 
-Critical for web applications where bundle size impacts load time.
+Critical for web applications where bundle size impacts load time. Sizes measured on the current build (235,927 bytes for comprs.wasm in web/src/lib/comprs-wasm/):
 
 | Library         | WASM Size  | Notes                               |
 | --------------- | ---------- | ----------------------------------- |
-| **comprs**      | **236 KB** | Zero deps, pure Rust, lossy PNG [1] |
+| **comprs**      | **≈236 KB**| Zero deps, pure Rust, lossy PNG [1] |
 | wasm-mozjpeg    | ~208 KB    | Emscripten compiled                 |
 | squoosh oxipng  | ~625 KB    | Google's Squoosh codec              |
 | squoosh mozjpeg | ~803 KB    | Google's Squoosh codec              |
