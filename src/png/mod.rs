@@ -304,6 +304,7 @@ pub enum FilterStrategy {
 ///
 /// # Returns
 /// Complete PNG file as bytes.
+#[must_use]
 pub fn encode(data: &[u8], width: u32, height: u32, color_type: ColorType) -> Result<Vec<u8>> {
     let mut output = Vec::new();
     encode_into(
@@ -318,6 +319,7 @@ pub fn encode(data: &[u8], width: u32, height: u32, color_type: ColorType) -> Re
 }
 
 /// Encode raw pixel data as PNG with custom options.
+#[must_use]
 pub fn encode_with_options(
     data: &[u8],
     width: u32,

@@ -48,6 +48,7 @@ const SOS: u16 = 0xFFDA; // Start of Scan
 ///
 /// # Returns
 /// Complete JPEG file as bytes.
+#[must_use]
 pub fn encode(data: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u8>> {
     let options = JpegOptions::fast(quality);
     let mut output = Vec::new();
@@ -56,6 +57,7 @@ pub fn encode(data: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u
 }
 
 /// Encode raw pixel data as JPEG with specified color type.
+#[must_use]
 pub fn encode_with_color(
     data: &[u8],
     width: u32,
@@ -228,6 +230,7 @@ impl JpegOptionsBuilder {
 ///
 /// # Returns
 /// Complete JPEG file as bytes.
+#[must_use]
 pub fn encode_with_options(
     data: &[u8],
     width: u32,
