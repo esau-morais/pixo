@@ -839,7 +839,9 @@ This pattern keeps the main logic unindented and easy to follow.
 
 ## Next Steps
 
-This introduction covers the Rust features most relevant to understanding comprs. To dive deeper:
+Continue to [Huffman Coding](./huffman-coding.md) to learn the foundational entropy coding technique used in both PNG and JPEG compression.
+
+This introduction covers the Rust features most relevant to understanding comprs. To dive deeper into Rust itself:
 
 - **The Rust Book**: https://doc.rust-lang.org/book/
 - **Rust by Example**: https://doc.rust-lang.org/rust-by-example/

@@ -860,7 +860,7 @@ These optimization patterns are applied throughout comprs. To see them in action
 
 ## Next Steps
 
-Continue to [Introduction to Rust](./introduction-to-rust.md) to understand the language features that make this high-performance, safe implementation possible.
+Continue to [Compression Evolution](./compression-evolution.md) to explore the history and philosophy behind modern compression techniques.
 
 ---
 
