@@ -27,6 +27,11 @@ const HASH_SIZE: usize = 1 << 16; // 65536 entries
 /// Size of the 3-byte hash table (singleton buckets).
 const HASH3_SIZE: usize = 1 << 15;
 
+/// Parameters for HT-style fast matchfinder (level 1).
+const HT_HASH_BITS: usize = 15;
+const HT_HASH_SIZE: usize = 1 << HT_HASH_BITS;
+const HT_BUCKET_SIZE: usize = 2;
+
 /// LZ77 token representing either a literal or a match.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Token {
@@ -68,6 +73,7 @@ struct LevelConfig {
     max_search_depth: usize,
     nice_length: usize,
     lazy: LazyKind,
+    use_ht: bool,
 }
 
 impl PackedToken {
@@ -180,6 +186,16 @@ fn hash3(data: &[u8], pos: usize) -> usize {
     ((val.wrapping_mul(0x1E35_A7BD)) >> 17) as usize & (HASH3_SIZE - 1)
 }
 
+/// Hash for HT buckets (15-bit) based on 4-byte sequence.
+#[inline(always)]
+fn hash4_ht(data: &[u8], pos: usize) -> usize {
+    if pos + 3 >= data.len() {
+        return 0;
+    }
+    let val = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+    (val.wrapping_mul(0x1E35_A7BD) >> (32 - HT_HASH_BITS)) as usize & (HT_HASH_SIZE - 1)
+}
+
 /// Heuristic: choose a minimum match length based on literal diversity and search depth.
 fn calculate_min_match_len(data: &[u8], max_search_depth: usize) -> usize {
     let mut used = [false; 256];
@@ -220,6 +236,8 @@ pub struct Lz77Compressor {
     head: Vec<i32>,
     /// Hash table for 3-byte matches (singleton buckets)
     head3: Vec<i32>,
+    /// Buckets for the fast HT-style matchfinder (level 1)
+    ht_buckets: Vec<[i32; HT_BUCKET_SIZE]>,
     /// Chain links: prev[pos % window] -> previous position with same hash
     prev: Vec<i32>,
     /// Level tuning knobs
@@ -236,6 +254,7 @@ impl Lz77Compressor {
         Self {
             head: vec![-1; HASH_SIZE],
             head3: vec![-1; HASH3_SIZE],
+            ht_buckets: vec![[-1; HT_BUCKET_SIZE]; HT_HASH_SIZE],
             prev: vec![-1; MAX_DISTANCE],
             config,
         }
@@ -274,6 +293,9 @@ impl Lz77Compressor {
         // Reset hash tables
         self.head.fill(-1);
         self.head3.fill(-1);
+        for bucket in &mut self.ht_buckets {
+            *bucket = [-1; HT_BUCKET_SIZE];
+        }
         self.prev.fill(-1);
 
         while pos < data.len() {
@@ -326,6 +348,8 @@ impl Lz77Compressor {
             // (prevents cascading deferrals)
             let best_match = if let Some(pending) = pending_match.take() {
                 Some(pending)
+            } else if self.config.use_ht {
+                self.find_best_match_ht(data, pos, self.config.nice_length, min_match_len)
             } else {
                 self.find_best_match(
                     data,
@@ -358,13 +382,24 @@ impl Lz77Compressor {
                         chain_limit
                     };
 
-                    if let Some((next_length, next_distance)) = self.find_best_match(
-                        data,
-                        pos + 1,
-                        next_chain.min(self.config.max_search_depth),
-                        self.config.nice_length,
-                        min_match_len,
-                    ) {
+                    let next_match = if self.config.use_ht {
+                        self.find_best_match_ht(
+                            data,
+                            pos + 1,
+                            self.config.nice_length,
+                            min_match_len,
+                        )
+                    } else {
+                        self.find_best_match(
+                            data,
+                            pos + 1,
+                            next_chain.min(self.config.max_search_depth),
+                            self.config.nice_length,
+                            min_match_len,
+                        )
+                    };
+
+                    if let Some((next_length, next_distance)) = next_match {
                         // Require significant improvement to justify deferral.
                         // A literal costs ~8-9 bits, so the next match should save more than that.
                         // Length difference of 3+ bytes typically saves 24+ bits of match data.
@@ -516,6 +551,66 @@ impl Lz77Compressor {
 
         if best_length >= MIN_MATCH_LENGTH {
             Some((best_length, best_distance))
+        } else {
+            None
+        }
+    }
+
+    /// Fast HT-style matchfinder for level 1 (2-entry buckets, shallow search).
+    fn find_best_match_ht(
+        &mut self,
+        data: &[u8],
+        pos: usize,
+        nice_length: usize,
+        min_match_length: usize,
+    ) -> Option<(usize, usize)> {
+        if pos + MIN_MATCH_LENGTH > data.len() {
+            return None;
+        }
+
+        let hash = hash4_ht(data, pos);
+        let bucket = &mut self.ht_buckets[hash];
+        let cand0 = bucket[0];
+        let cand1 = bucket[1];
+
+        // Insert current position at head of bucket
+        bucket[1] = cand0;
+        bucket[0] = pos as i32;
+
+        let mut best_len = min_match_length.saturating_sub(1);
+        let mut best_dist = 0usize;
+
+        for &cand in [cand0, cand1].iter() {
+            if cand < 0 {
+                continue;
+            }
+            let match_pos = cand as usize;
+            let distance = pos - match_pos;
+            if distance > MAX_DISTANCE || match_pos + 3 > data.len() {
+                continue;
+            }
+            let a = &data[pos..pos + 3];
+            let b = &data[match_pos..match_pos + 3];
+            if a != b {
+                continue;
+            }
+            let len = self
+                .match_length(data, match_pos, pos)
+                .min(MAX_MATCH_LENGTH);
+            if len < min_match_length || (len == 3 && distance > 8192) {
+                continue;
+            }
+            if len > best_len {
+                best_len = len;
+                best_dist = distance;
+                if best_len >= nice_length {
+                    break;
+                }
+            }
+        }
+
+        if best_len >= MIN_MATCH_LENGTH {
+            Some((best_len, best_dist))
         } else {
             None
         }
@@ -1003,54 +1098,63 @@ impl Lz77Compressor {
                 max_search_depth: 4,
                 nice_length: 32,
                 lazy: LazyKind::None,
+                use_ht: true,
             },
             2 => LevelConfig {
                 max_chain_length: 8,
                 max_search_depth: 6,
                 nice_length: 10,
                 lazy: LazyKind::None,
+                use_ht: false,
             },
             3 => LevelConfig {
                 max_chain_length: 16,
                 max_search_depth: 12,
                 nice_length: 14,
                 lazy: LazyKind::None,
+                use_ht: false,
             },
             4 => LevelConfig {
                 max_chain_length: 32,
                 max_search_depth: 16,
                 nice_length: 30,
                 lazy: LazyKind::None,
+                use_ht: false,
             },
             5 => LevelConfig {
                 max_chain_length: 64,
                 max_search_depth: 16,
                 nice_length: 30,
                 lazy: LazyKind::Lazy,
+                use_ht: false,
             },
             6 => LevelConfig {
                 max_chain_length: 128,
                 max_search_depth: 35,
                 nice_length: 65,
                 lazy: LazyKind::Lazy,
+                use_ht: false,
             },
             7 => LevelConfig {
                 max_chain_length: 256,
                 max_search_depth: 100,
                 nice_length: 130,
                 lazy: LazyKind::Lazy,
+                use_ht: false,
             },
             8 => LevelConfig {
                 max_chain_length: 1024,
                 max_search_depth: 300,
                 nice_length: MAX_MATCH_LENGTH,
                 lazy: LazyKind::Lazy2,
+                use_ht: false,
             },
             9 | _ => LevelConfig {
                 max_chain_length: 4096,
                 max_search_depth: 600,
                 nice_length: MAX_MATCH_LENGTH,
                 lazy: LazyKind::Lazy2,
+                use_ht: false,
             },
         }
     }
