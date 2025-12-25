@@ -4,7 +4,7 @@
 
 use crate::bits::BitWriter64;
 use crate::compress::lz77::{
-    CostModel, Lz77Compressor, PackedToken, Token, MAX_MATCH_LENGTH, MIN_MATCH_LENGTH,
+    CostModel, Lz77Compressor, PackedToken, Token, MAX_DISTANCE, MAX_MATCH_LENGTH, MIN_MATCH_LENGTH,
 };
 use crate::compress::{adler32::adler32, huffman};
 use std::sync::{LazyLock, Mutex};
@@ -111,15 +111,6 @@ const HIGH_ENTROPY_BAIL_BYTES: usize = 4 * 1024;
 /// When input has only literals (no matches) and meets this size, prefer stored blocks immediately.
 const STORED_LITERAL_ONLY_BYTES: usize = 8 * 1024;
 
-#[inline]
-fn max_passthrough_size(level: u8) -> usize {
-    if level == 0 {
-        return usize::MAX;
-    }
-    // Mirror libdeflate heuristic: higher level -> smaller passthrough allowance.
-    55usize.saturating_sub((level as usize) * 4)
-}
-
 /// Global pool of reusable deflaters keyed by compression level.
 /// Mutex-protected to allow reuse across threads while avoiding RefCell/thread-local costs.
 static DEFLATE_REUSE: LazyLock<Vec<Mutex<Deflater>>> = LazyLock::new(|| {
@@ -196,6 +187,14 @@ fn encode_with_block_splitting(tokens: &[Token], max_blocks: usize) -> Vec<u8> {
         // Too small to benefit
         return encode_dynamic_huffman_with_capacity(tokens, tokens.len() * 2);
     }
+
+    debug_assert!(
+        tokens.iter().all(|t| match t {
+            Token::Match { distance, .. } => *distance >= 1,
+            _ => true,
+        }),
+        "Found zero-distance match before block splitting"
+    );
 
     let splits = find_block_splits(tokens, max_blocks);
     if splits.is_empty() {
@@ -287,10 +286,6 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
         return empty_deflate_fixed_block();
     }
 
-    if data.len() <= max_passthrough_size(level) {
-        return deflate_stored(data);
-    }
-
     if data.len() <= SMALL_INPUT_BYTES {
         with_reusable_deflater(level, |deflater| deflater.compress_fixed_only(data))
     } else {
@@ -303,10 +298,6 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
 pub fn deflate_packed(data: &[u8], level: u8) -> Vec<u8> {
     if data.is_empty() {
         return empty_deflate_fixed_block();
-    }
-
-    if data.len() <= max_passthrough_size(level) {
-        return deflate_stored(data);
     }
 
     if data.len() <= SMALL_INPUT_BYTES {
@@ -444,12 +435,18 @@ fn count_symbols(tokens: &[Token]) -> ([u32; 286], [u32; 30]) {
     let mut lit_len_counts = [0u32; 286];
     let mut dist_counts = [0u32; 30];
 
-    for token in tokens {
+    for (i, token) in tokens.iter().enumerate() {
         match *token {
             Token::Literal(b) => {
                 lit_len_counts[b as usize] += 1;
             }
             Token::Match { length, distance } => {
+                debug_assert!(
+                    (1..=MAX_DISTANCE as u16).contains(&distance),
+                    "bad distance {} at token {}",
+                    distance,
+                    i
+                );
                 let (len_symbol, _, _) = length_code(length);
                 lit_len_counts[len_symbol as usize] += 1;
 
@@ -487,12 +484,18 @@ fn count_symbols_range(tokens: &[Token], start: usize, end: usize) -> ([u32; 286
     let mut lit_len_counts = [0u32; 286];
     let mut dist_counts = [0u32; 30];
 
-    for token in &tokens[start..end] {
+    for (i, token) in tokens[start..end].iter().enumerate() {
         match *token {
             Token::Literal(b) => {
                 lit_len_counts[b as usize] += 1;
             }
             Token::Match { length, distance } => {
+                debug_assert!(
+                    (1..=MAX_DISTANCE as u16).contains(&distance),
+                    "bad distance {} in range count at token {}",
+                    distance,
+                    start + i
+                );
                 let (len_symbol, _, _) = length_code(length);
                 lit_len_counts[len_symbol as usize] += 1;
 
@@ -840,6 +843,17 @@ pub fn deflate_optimal_split(data: &[u8], iterations: usize, max_blocks: usize) 
         }
     }
 
+    if best_tokens
+        .iter()
+        .any(|t| matches!(t, Token::Match { distance, .. } if *distance == 0))
+    {
+        // Fallback to greedy tokens if we somehow produced an invalid match.
+        let fallback_tokens = lz77.compress(data);
+        let (encoded, _) =
+            encode_best_huffman(&fallback_tokens, estimated_deflate_size(data.len(), 9));
+        return encoded;
+    }
+
     // Find optimal block splits
     let splits = find_block_splits(&best_tokens, max_blocks);
 
@@ -1002,10 +1016,6 @@ impl Deflater {
             return empty_deflate_fixed_block();
         }
 
-        if data.len() <= max_passthrough_size(self.level) {
-            return deflate_stored(data);
-        }
-
         self.tokens.clear();
         self.tokens.reserve(data.len());
         self.lz77.compress_into(data, &mut self.tokens);
@@ -1042,15 +1052,6 @@ impl Deflater {
             return empty_zlib(self.level);
         }
 
-        if data.len() <= max_passthrough_size(self.level) {
-            let stored_blocks = deflate_stored(data);
-            let mut output = Vec::with_capacity(stored_blocks.len().min(data.len()) + 32);
-            output.extend_from_slice(&zlib_header(self.level));
-            output.extend_from_slice(&stored_blocks);
-            output.extend_from_slice(&adler32(data).to_be_bytes());
-            return output;
-        }
-
         self.tokens.clear();
         self.tokens.reserve(data.len());
         self.lz77.compress_into(data, &mut self.tokens);
@@ -1085,10 +1086,6 @@ impl Deflater {
     pub fn compress_packed(&mut self, data: &[u8]) -> Vec<u8> {
         if data.is_empty() {
             return empty_deflate_fixed_block();
-        }
-
-        if data.len() <= max_passthrough_size(self.level) {
-            return deflate_stored(data);
         }
 
         self.packed_tokens.clear();

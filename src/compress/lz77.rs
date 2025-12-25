@@ -365,6 +365,14 @@ impl Lz77Compressor {
                 incompressible_mode = false;
                 probe_since_last = 0;
 
+                if distance == 0 {
+                    // Defensive: treat as literal if match distance is invalid.
+                    sink.push_literal(data[pos]);
+                    self.update_hash(data, pos);
+                    pos += 1;
+                    continue;
+                }
+
                 // Check for lazy match if enabled, but skip for "good enough" matches.
                 // Only defer if the next match is significantly better (>= 3 bytes longer)
                 // to justify the cost of emitting a literal.
@@ -467,7 +475,9 @@ impl Lz77Compressor {
         if cand3 >= 0 {
             let match_pos = cand3 as usize;
             let distance = pos - match_pos;
-            if distance <= MAX_DISTANCE && match_pos + 3 <= data.len() {
+            if distance == 0 {
+                // Skip self-reference
+            } else if distance <= MAX_DISTANCE && match_pos + 3 <= data.len() {
                 let a = &data[pos..pos + 3];
                 let b = &data[match_pos..match_pos + 3];
                 if a == b {
@@ -507,6 +517,12 @@ impl Lz77Compressor {
         while chain_pos >= 0 && chain_remaining > 0 {
             let match_pos = chain_pos as usize;
             let distance = pos - match_pos;
+
+            if distance == 0 {
+                chain_pos = self.prev[match_pos % MAX_DISTANCE];
+                chain_remaining -= 1;
+                continue;
+            }
 
             if distance > max_distance {
                 break;
@@ -586,7 +602,7 @@ impl Lz77Compressor {
             }
             let match_pos = cand as usize;
             let distance = pos - match_pos;
-            if distance > MAX_DISTANCE || match_pos + 3 > data.len() {
+            if distance == 0 || distance > MAX_DISTANCE || match_pos + 3 > data.len() {
                 continue;
             }
             let a = &data[pos..pos + 3];
@@ -702,7 +718,9 @@ impl Lz77Compressor {
         if cand3 >= 0 {
             let match_pos = cand3 as usize;
             let distance = pos - match_pos;
-            if distance <= MAX_DISTANCE && match_pos + 3 <= data.len() {
+            if distance == 0 {
+                // Skip self-reference
+            } else if distance <= MAX_DISTANCE && match_pos + 3 <= data.len() {
                 let a = &data[pos..pos + 3];
                 let b = &data[match_pos..match_pos + 3];
                 if a == b {
@@ -723,6 +741,12 @@ impl Lz77Compressor {
         while chain_pos >= 0 && chain_remaining > 0 {
             let match_pos = chain_pos as usize;
             let distance = pos - match_pos;
+
+            if distance == 0 {
+                chain_pos = self.prev[match_pos % MAX_DISTANCE];
+                chain_remaining -= 1;
+                continue;
+            }
 
             if distance > max_distance {
                 break;
@@ -791,9 +815,6 @@ impl Lz77Compressor {
                 continue;
             }
 
-            // Update hash for this position
-            self.update_hash(data, i);
-
             // Try emitting a literal
             let lit_cost = costs[i] + cost_model.literal_cost(data[i]);
             if lit_cost < costs[i + 1] {
@@ -820,6 +841,9 @@ impl Lz77Compressor {
                     dist_array[end_pos] = dist;
                 }
             }
+
+            // Insert this position into hash tables after using prior history.
+            self.update_hash(data, i);
         }
 
         // Backward pass: reconstruct optimal token sequence
@@ -866,6 +890,12 @@ impl Lz77Compressor {
                 // Literal
                 tokens.push(Token::Literal(data[data_pos]));
             } else {
+                // Defensive: distance must be at least 1; otherwise treat as literal.
+                if dist == 0 {
+                    tokens.push(Token::Literal(data[data_pos]));
+                    data_pos += 1;
+                    continue;
+                }
                 // Match
                 tokens.push(Token::Match {
                     length: len as u16,
