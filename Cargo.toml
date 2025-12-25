@@ -56,23 +56,11 @@ jpeg-decoder = "0.3"
 
 
 [[bench]]
-name = "encode_benchmark"
-harness = false
-
-[[bench]]
-name = "deflate_micro"
-harness = false
-
-[[bench]]
 name = "components"
 harness = false
 
 [[bench]]
 name = "comparison"
-harness = false
-
-[[bench]]
-name = "jpeg_mozjpeg"
 harness = false
 
 [profile.release]

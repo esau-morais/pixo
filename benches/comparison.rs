@@ -305,7 +305,7 @@ fn encode_with_imagequant(pixels: &[u8], width: u32, height: u32) -> Option<(usi
 fn bench_png_all_presets(c: &mut Criterion) {
     let mut group = c.benchmark_group("PNG All Presets");
 
-    for size in [256, 512].iter() {
+    for size in [512].iter() {
         let gradient = generate_gradient_image(*size, *size);
         let pixel_bytes = (*size as u64) * (*size as u64) * 3;
 
@@ -397,7 +397,7 @@ fn bench_png_all_presets(c: &mut Criterion) {
 fn bench_png_lossy_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("PNG Lossy Comparison");
 
-    for size in [256, 512].iter() {
+    for size in [512].iter() {
         let gradient = generate_gradient_image(*size, *size);
         let pixel_bytes = (*size as u64) * (*size as u64) * 3;
 
@@ -494,7 +494,7 @@ fn bench_png_lossy_comparison(c: &mut Criterion) {
 fn bench_jpeg_all_presets(c: &mut Criterion) {
     let mut group = c.benchmark_group("JPEG All Presets");
 
-    for size in [256, 512].iter() {
+    for size in [512].iter() {
         let gradient = generate_gradient_image(*size, *size);
         let pixel_bytes = (*size as u64) * (*size as u64) * 3;
 
@@ -1230,8 +1230,8 @@ fn load_kodak_for_benchmark() -> Option<Vec<(String, u32, u32, Vec<u8>)>> {
     }
 
     let mut images = Vec::new();
-    // Load first 4 images for reasonable benchmark time
-    for i in 1..=4 {
+    // Load first 2 images for faster benchmark time
+    for i in 1..=2 {
         let path = fixtures_dir.join(format!("kodim{i:02}.png"));
         if !path.exists() {
             continue;
@@ -1314,8 +1314,9 @@ fn bench_kodak_suite(c: &mut Criterion) {
 
 fn custom_criterion() -> Criterion {
     Criterion::default()
-        .sample_size(50)
-        .measurement_time(std::time::Duration::from_secs(5))
+        .sample_size(20)
+        .measurement_time(std::time::Duration::from_secs(2))
+        .warm_up_time(std::time::Duration::from_millis(500))
 }
 
 criterion_group! {

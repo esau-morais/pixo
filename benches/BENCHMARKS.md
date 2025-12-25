@@ -79,7 +79,7 @@ Testing on actual images from the test fixtures:
 - On images with solid colors/flat areas (rocket.png), **comprs wins by 28%**
 - On complex photographic images, pngquant's libimagequant produces smaller files
 - Both achieve **50-80% reduction** compared to lossless PNG
-- comprs has zero external dependencies (236 KB WASM vs pngquant's native binary)
+- comprs has zero external dependencies (146 KB WASM vs pngquant's native binary)
 
 ### Synthetic Benchmark (512×512 gradient)
 
@@ -102,7 +102,7 @@ Gradient images are a **worst-case scenario** for quantization because they cont
 | **Images with flat colors/UI**      | comprs Lossy often beats pngquant            |
 | **Complex photos, max compression** | pngquant produces smaller files              |
 | **Icons and logos (<256 colors)**   | Use lossless - already optimized             |
-| **WASM bundle size matters**        | comprs Lossy (no external deps, 236 KB WASM) |
+| **WASM bundle size matters**        | comprs Lossy (no external deps, 146 KB WASM) |
 
 ### Lossy PNG Settings
 
@@ -151,7 +151,7 @@ Critical for web applications where bundle size impacts load time.
 
 | Library         | WASM Size  | Notes                               |
 | --------------- | ---------- | ----------------------------------- |
-| **comprs**      | **142 KB** | Zero deps, pure Rust, lossy PNG [1] |
+| **comprs**      | **146 KB** | Zero deps, pure Rust, lossy PNG [1] |
 | wasm-mozjpeg    | ~208 KB    | Emscripten compiled                 |
 | squoosh oxipng  | ~625 KB    | Google's Squoosh codec              |
 | squoosh mozjpeg | ~803 KB    | Google's Squoosh codec              |
@@ -170,7 +170,7 @@ panic = "abort"      # Remove unwinding code
 strip = true         # Strip symbols
 ```
 
-Build command for the 142 KB binary:
+Build command for the 146 KB binary:
 
 ```bash
 cargo build --target wasm32-unknown-unknown --release --no-default-features --features wasm,simd
@@ -189,7 +189,7 @@ Comparison of Rust image compression libraries.
 
 | Library           | WASM-friendly   | Binary Size  | Throughput | SIMD Support | Notes                                          |
 | ----------------- | --------------- | ------------ | ---------- | ------------ | ---------------------------------------------- |
-| **comprs**        | Yes             | 236 KB       | Excellent  | NEON + AVX2  | Zero deps, pure Rust, lossy PNG, parallel JPEG |
+| **comprs**        | Yes             | 146 KB       | Excellent  | NEON + AVX2  | Zero deps, pure Rust, lossy PNG, parallel JPEG |
 | `image`           | Yes             | ~2-4 MB      | Good       | Limited      | Pure Rust, many codecs included                |
 | `photon-rs`       | Yes             | ~200-400 KB  | Excellent  | Yes          | Pure Rust, designed for WASM [2]               |
 | `zune-image`      | Yes             | ~500 KB-1 MB | Excellent  | x86 SIMD     | Pure Rust, SIMD optimized [3]                  |
@@ -293,13 +293,13 @@ cargo build --release --no-default-features --features simd
 | PNG 512×512 Fast           | 1.47 ms, 8.7 KB    | image: 0.67 ms, 77 KB     | **10× smaller output**  |
 | PNG 512×512 Balanced       | 5.46 ms, 7.6 KB    | oxipng: 101 ms, 4.3 KB    | **18× faster**          |
 | JPEG 512×512 Fast          | 1.83 ms, 17.3 KB   | image: 1.46 ms, 17 KB     | Comparable              |
-| JPEG 512×512 Max           | 7.25 ms, 10.5 KB   | mozjpeg: 10.8 ms, 8.2 KB  | **1.5× faster**         |
+| JPEG 512×512 Max           | 7.36 ms, 10.5 KB   | mozjpeg: 16.4 ms, 8.2 KB  | **2.2× faster**         |
 
 ### Decision Matrix by Primary Constraint
 
 | If you need...             | PNG                   | JPEG                  | Why                                |
 | -------------------------- | --------------------- | --------------------- | ---------------------------------- |
-| Smallest WASM binary       | comprs (236 KB)       | comprs (236 KB)       | 3× smaller than Squoosh            |
+| Smallest WASM binary       | comprs (146 KB)       | comprs (146 KB)       | 4× smaller than Squoosh            |
 | Best lossless compression  | oxipng                | N/A                   | Gold standard, but larger binaries |
 | Best lossy PNG compression | comprs Lossy/pngquant | N/A                   | 50-80% smaller than lossless       |
 | Fastest encoding           | comprs Fast or image  | comprs Fast           | Minimal overhead                   |
@@ -312,7 +312,7 @@ cargo build --release --no-default-features --features simd
 
 | Scenario                                     | Recommendation                                          |
 | -------------------------------------------- | ------------------------------------------------------- |
-| **Building a web app with WASM?**            | Use comprs (236 KB binary, good compression)            |
+| **Building a web app with WASM?**            | Use comprs (146 KB binary, good compression)            |
 | **Need smallest PNG file size?**             | Use comprs Lossy (50-80% smaller than lossless)         |
 | **CLI tool, size doesn't matter?**           | Use oxipng/mozjpeg/pngquant (best compression ratios)   |
 | **Node.js server, need speed?**              | Use sharp (native bindings, excellent performance)      |
