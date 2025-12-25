@@ -565,12 +565,10 @@ impl Lz77Compressor {
             chain_remaining -= 1;
         }
 
-        // A valid match requires both sufficient length AND a non-zero distance.
-        // When min_match_length > MIN_MATCH_LENGTH, best_length is initialized to
-        // min_match_length - 1, which can equal MIN_MATCH_LENGTH. If no match is found,
-        // best_distance remains 0, so we must check both conditions to avoid returning
-        // an invalid (length, 0) match.
-        if best_length >= MIN_MATCH_LENGTH && best_distance > 0 {
+        // Only return a match if it meets the minimum length requirement.
+        // best_distance is only updated when we find a valid match, so if
+        // best_length >= min_match_length, best_distance is guaranteed to be valid (> 0).
+        if best_length >= min_match_length {
             Some((best_length, best_distance))
         } else {
             None
@@ -630,9 +628,10 @@ impl Lz77Compressor {
             }
         }
 
-        // A valid match requires both sufficient length AND a non-zero distance.
-        // See find_best_match for detailed explanation of this invariant.
-        if best_len >= MIN_MATCH_LENGTH && best_dist > 0 {
+        // Only return a match if it meets the minimum length requirement.
+        // best_dist is only updated when we find a valid match, so if
+        // best_len >= min_match_length, best_dist is guaranteed to be valid (> 0).
+        if best_len >= min_match_length {
             Some((best_len, best_dist))
         } else {
             None
@@ -1465,5 +1464,120 @@ mod tests {
             "find_best_match returned invalid match with distance 0: {:?}",
             result
         );
+    }
+
+    #[test]
+    fn test_find_best_match_respects_min_match_length() {
+        // Regression test: find_best_match should never return a match shorter than
+        // min_match_length, and should never return a zero distance.
+        let mut compressor = Lz77Compressor::new(6);
+
+        // Create data where the only possible match is exactly 4 bytes.
+        // "abcdXYZWabcdPQRS" - "abcd" appears at position 0 and 8, but
+        // the bytes after differ, limiting match to 4 bytes.
+        let data = b"abcdXYZWabcdPQRS";
+
+        // Reset hash tables
+        compressor.head.fill(-1);
+        compressor.head3.fill(-1);
+        compressor.prev.fill(-1);
+
+        // Insert the first occurrence into hash tables (positions 0-7)
+        for i in 0..8 {
+            compressor.update_hash(data, i);
+        }
+
+        // At position 8, we should find a 4-byte match (abcd).
+        // With min_match_length = 5, we should get None (not Some((4, 0)))
+        let result = compressor.find_best_match(data, 8, 100, 258, 5);
+        assert!(
+            result.is_none(),
+            "find_best_match returned {:?} when no match >= min_match_length exists",
+            result
+        );
+
+        // With min_match_length = 4, we should get a valid match
+        let result = compressor.find_best_match(data, 8, 100, 258, 4);
+        assert!(result.is_some(), "Expected a match with min_match_length=4");
+        let (len, dist) = result.unwrap();
+        assert!(len >= 4, "Match length should be >= min_match_length");
+        assert!(dist > 0, "Match distance must be > 0");
+        assert_eq!(dist, 8, "Distance should be 8 (back to position 0)");
+    }
+
+    #[test]
+    fn test_find_best_match_ht_respects_min_match_length() {
+        // Same regression test for the HT-style matchfinder
+        let mut compressor = Lz77Compressor::new(1); // Level 1 uses HT
+
+        // Same test data: only a 4-byte match is possible
+        let data = b"abcdXYZWabcdPQRS";
+
+        // Reset HT buckets
+        for bucket in &mut compressor.ht_buckets {
+            *bucket = [-1; HT_BUCKET_SIZE];
+        }
+
+        // Insert first occurrence at position 0
+        let hash = hash4_ht(data, 0);
+        compressor.ht_buckets[hash][0] = 0;
+
+        // At position 8, with min_match_length = 5, we should get None
+        let result = compressor.find_best_match_ht(data, 8, 258, 5);
+        assert!(
+            result.is_none(),
+            "find_best_match_ht returned {:?} when no match >= min_match_length exists",
+            result
+        );
+
+        // With min_match_length = 4, we should get a valid match
+        let result = compressor.find_best_match_ht(data, 8, 258, 4);
+        assert!(
+            result.is_some(),
+            "Expected a match with min_match_length=4"
+        );
+        let (len, dist) = result.unwrap();
+        assert!(len >= 4, "Match length should be >= min_match_length");
+        assert!(dist > 0, "Match distance must be > 0");
+        assert_eq!(dist, 8, "Distance should be 8 (back to position 0)");
+    }
+
+    #[test]
+    fn test_find_best_match_never_returns_zero_distance() {
+        // Additional regression test: verify that matches always have valid distances.
+        // This specifically tests the edge case where min_match_length > MIN_MATCH_LENGTH.
+        let mut compressor = Lz77Compressor::new(6);
+
+        // Data with no repeating patterns - should return None for any min_match_length
+        let data = b"abcdefghijklmnop";
+
+        compressor.head.fill(-1);
+        compressor.head3.fill(-1);
+        compressor.prev.fill(-1);
+
+        // Insert early positions
+        for i in 0..8 {
+            compressor.update_hash(data, i);
+        }
+
+        // No matches should be found
+        for min_len in 3..=6 {
+            let result = compressor.find_best_match(data, 8, 100, 258, min_len);
+            if let Some((len, dist)) = result {
+                assert!(
+                    dist > 0,
+                    "find_best_match returned zero distance: len={}, dist={}, min_len={}",
+                    len,
+                    dist,
+                    min_len
+                );
+                assert!(
+                    len >= min_len,
+                    "find_best_match returned length {} < min_match_length {}",
+                    len,
+                    min_len
+                );
+            }
+        }
     }
 }
