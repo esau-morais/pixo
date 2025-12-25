@@ -428,11 +428,73 @@ mod tests {
     }
 
     #[test]
+    fn test_simple_script_coverage() {
+        let script = simple_progressive_script();
+
+        // All scans should have valid component indices
+        for scan in &script {
+            for &c in &scan.components {
+                assert!(c < 3, "Invalid component index");
+            }
+            assert!(scan.ss <= scan.se);
+            assert!(scan.se <= 63);
+        }
+        // Simple script has fewer scans than default
+        assert!(script.len() < default_progressive_script().len());
+    }
+
+    #[test]
     fn test_category() {
         assert_eq!(category(0), 0);
         assert_eq!(category(1), 1);
         assert_eq!(category(-1), 1);
         assert_eq!(category(127), 7);
         assert_eq!(category(-128), 8);
+    }
+
+    #[test]
+    fn test_encode_value() {
+        // Zero value
+        assert_eq!(encode_value(0), (0, 0));
+
+        // Positive values
+        let (bits, len) = encode_value(1);
+        assert_eq!(len, 1);
+        assert_eq!(bits, 1);
+
+        let (bits, len) = encode_value(127);
+        assert_eq!(len, 7);
+        assert_eq!(bits, 127);
+
+        // Negative values (encoded as ones' complement)
+        let (bits, len) = encode_value(-1);
+        assert_eq!(len, 1);
+        assert_eq!(bits, 0); // -1 -> 0 in ones' complement for 1 bit
+
+        let (_bits, len) = encode_value(-127);
+        assert_eq!(len, 7);
+    }
+
+    #[test]
+    fn test_scan_spec_first_vs_refinement() {
+        // First scan has ah=0
+        let first = ScanSpec::new(vec![0], 0, 0, 0, 1);
+        assert!(first.is_first_scan());
+        assert!(!first.is_refinement_scan());
+
+        // Refinement scan has ah>0
+        let refine = ScanSpec::new(vec![0], 0, 0, 1, 0);
+        assert!(!refine.is_first_scan());
+        assert!(refine.is_refinement_scan());
+    }
+
+    #[test]
+    fn test_get_code_from_table_fallback() {
+        // Test with empty/minimal tables to exercise fallback path
+        let bits = [0u8; 16];
+        let vals: [u8; 0] = [];
+        let (code, len) = get_code_from_table(&bits, &vals, 0);
+        // Fallback returns EOB code
+        assert_eq!((code, len), (0, 4));
     }
 }

@@ -383,4 +383,74 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_build_codes_empty() {
+        let freqs: [u32; 0] = [];
+        let codes = build_codes(&freqs, 15);
+        assert!(codes.is_empty());
+    }
+
+    #[test]
+    fn test_build_codes_all_zero() {
+        let freqs = [0, 0, 0, 0];
+        let codes = build_codes(&freqs, 15);
+        assert_eq!(codes.len(), 4);
+        for code in &codes {
+            assert_eq!(code.length, 0);
+        }
+    }
+
+    #[test]
+    fn test_generate_canonical_codes_directly() {
+        // Test the canonical code generation function directly
+        let lengths = [2, 1, 3, 3];
+        let codes = generate_canonical_codes(&lengths);
+
+        assert_eq!(codes.len(), 4);
+        // Symbol 1 has length 1, so should have code 0
+        assert_eq!(codes[1].length, 1);
+        assert_eq!(codes[1].code, 0);
+
+        // Symbol 0 has length 2, should start after symbol 1
+        assert_eq!(codes[0].length, 2);
+    }
+
+    #[test]
+    fn test_huffman_code_default() {
+        let code = HuffmanCode::default();
+        assert_eq!(code.code, 0);
+        assert_eq!(code.length, 0);
+    }
+
+    #[test]
+    fn test_limit_code_lengths_no_overflow() {
+        // When no codes exceed max length, should be unchanged
+        let freqs = [10, 5, 3, 2];
+        let codes = build_codes(&freqs, 15);
+        for code in &codes {
+            assert!(code.length <= 15);
+        }
+    }
+
+    #[test]
+    fn test_limit_code_lengths_with_overflow() {
+        // Force a situation where initial tree would be too deep
+        // by having exponentially growing frequencies
+        let mut freqs = vec![1u32; 32];
+        for i in 0..32 {
+            freqs[i] = 1 << i;
+        }
+        // Use a small max length to force limiting
+        let codes = build_codes(&freqs, 7);
+        for code in &codes {
+            if code.length > 0 {
+                assert!(
+                    code.length <= 7,
+                    "code length {} exceeds max 7",
+                    code.length
+                );
+            }
+        }
+    }
 }

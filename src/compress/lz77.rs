@@ -1574,6 +1574,109 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_lz77_default() {
+        let compressor = Lz77Compressor::default();
+        // Default level is 6
+        assert_eq!(compressor.config.max_chain_length, 128);
+    }
+
+    #[test]
+    fn test_lz77_compress_into() {
+        let mut compressor = Lz77Compressor::new(6);
+        let data = b"abcdefgh";
+        let mut tokens = Vec::new();
+        compressor.compress_into(data, &mut tokens);
+        assert_eq!(tokens.len(), 8);
+    }
+
+    #[test]
+    fn test_lz77_compress_packed() {
+        let mut compressor = Lz77Compressor::new(6);
+        let data = b"abcabcabc";
+        let tokens = compressor.compress_packed(data);
+        assert!(!tokens.is_empty());
+    }
+
+    #[test]
+    fn test_lz77_compress_packed_into() {
+        let mut compressor = Lz77Compressor::new(6);
+        let data = b"abcabcabc";
+        let mut tokens = Vec::new();
+        compressor.compress_packed_into(data, &mut tokens);
+        assert!(!tokens.is_empty());
+    }
+
+    #[test]
+    fn test_cost_model_default() {
+        let model = CostModel::default();
+        // Should be same as fixed
+        assert!((model.literal_cost(b'a') - 8.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_cost_model_from_empty_statistics() {
+        let lit_counts = [0u32; 286];
+        let dist_counts = [0u32; 30];
+
+        // Empty statistics should fall back to fixed costs
+        let model = CostModel::from_statistics(&lit_counts, &dist_counts);
+        assert!((model.literal_cost(b'a') - 8.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_cost_model_from_statistics_no_distances() {
+        let mut lit_counts = [0u32; 286];
+        let dist_counts = [0u32; 30];
+
+        lit_counts[b'a' as usize] = 100;
+        lit_counts[256] = 1;
+
+        // No distance symbols - should use fixed distance costs
+        let model = CostModel::from_statistics(&lit_counts, &dist_counts);
+        assert!(model.dist_costs[0] > 0.0);
+    }
+
+    #[test]
+    fn test_length_to_symbol_all_ranges() {
+        // Test a representative value from each length code range
+        for length in 3..=258u16 {
+            let (symbol, extra_bits) = length_to_symbol(length);
+            assert!((257..=285).contains(&symbol));
+            assert!(extra_bits <= 5);
+        }
+    }
+
+    #[test]
+    fn test_distance_to_symbol_all_ranges() {
+        // Test various distances
+        for &dist in &[1, 2, 3, 4, 5, 10, 100, 1000, 10000, 32768] {
+            let (symbol, extra_bits) = distance_to_symbol(dist);
+            assert!(symbol < 30);
+            assert!(extra_bits <= 13);
+        }
+    }
+
+    #[test]
+    fn test_lz77_level_clamping() {
+        // Test that level is clamped to valid range
+        let compressor = Lz77Compressor::new(0); // Below minimum
+        assert!(compressor.config.max_chain_length > 0);
+
+        let compressor = Lz77Compressor::new(100); // Above maximum
+        assert!(compressor.config.max_chain_length > 0);
+    }
+
+    #[test]
+    fn test_lz77_all_levels() {
+        let data = b"abcabcabcabcabc";
+        for level in 1..=9 {
+            let mut compressor = Lz77Compressor::new(level);
+            let tokens = compressor.compress(data);
+            assert!(!tokens.is_empty());
+        }
+    }
 }
 
 #[cfg(test)]
