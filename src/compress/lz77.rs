@@ -1438,10 +1438,7 @@ mod tests {
         // Verify no zero-distance matches in result
         for token in &result {
             if let Token::Match { distance, .. } = token {
-                assert!(
-                    *distance > 0,
-                    "Found invalid match with distance 0"
-                );
+                assert!(*distance > 0, "Found invalid match with distance 0");
             }
         }
     }
@@ -1532,10 +1529,7 @@ mod tests {
 
         // With min_match_length = 4, we should get a valid match
         let result = compressor.find_best_match_ht(data, 8, 258, 4);
-        assert!(
-            result.is_some(),
-            "Expected a match with min_match_length=4"
-        );
+        assert!(result.is_some(), "Expected a match with min_match_length=4");
         let (len, dist) = result.unwrap();
         assert!(len >= 4, "Match length should be >= min_match_length");
         assert!(dist > 0, "Match distance must be > 0");
