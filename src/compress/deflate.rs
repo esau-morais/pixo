@@ -181,6 +181,35 @@ fn encode_best_huffman_packed(tokens: &[PackedToken], est_bytes: usize) -> (Vec<
     }
 }
 
+/// Encode tokens using adaptive block splitting (dynamic Huffman per block).
+fn encode_with_block_splitting(tokens: &[Token], max_blocks: usize) -> Vec<u8> {
+    if tokens.len() < MIN_BLOCK_SIZE * 2 {
+        // Too small to benefit
+        return encode_dynamic_huffman_with_capacity(tokens, tokens.len() * 2);
+    }
+
+    let splits = find_block_splits(tokens, max_blocks);
+    if splits.is_empty() {
+        return encode_dynamic_huffman_with_capacity(tokens, tokens.len() * 2);
+    }
+
+    let mut writer = BitWriter64::with_capacity(tokens.len() * 2);
+    let boundaries: Vec<usize> = std::iter::once(0)
+        .chain(splits.iter().copied())
+        .chain(std::iter::once(tokens.len()))
+        .collect();
+
+    for i in 0..boundaries.len() - 1 {
+        let start = boundaries[i];
+        let end = boundaries[i + 1];
+        let is_final = i == boundaries.len() - 2;
+        let block_tokens = &tokens[start..end];
+        write_dynamic_huffman_block(&mut writer, block_tokens, is_final);
+    }
+
+    writer.finish()
+}
+
 /// Lookup table for distance codes: maps distance (1-32768) to code index.
 /// Uses a two-level approach for efficiency.
 const DISTANCE_LOOKUP_SMALL: [u8; 512] = {
@@ -961,8 +990,16 @@ impl Deflater {
         self.lz77.compress_into(data, &mut self.tokens);
 
         let est_bytes = estimated_deflate_size(data.len(), self.level);
-        let (encoded, _) = encode_best_huffman(&self.tokens, est_bytes);
-        encoded
+        let use_split = self.level >= 5
+            && data.len() > SMALL_INPUT_BYTES
+            && data.len() <= BLOCK_SPLIT_SIZE_LIMIT;
+
+        if use_split {
+            encode_with_block_splitting(&self.tokens, DEFAULT_MAX_BLOCKS)
+        } else {
+            let (encoded, _) = encode_best_huffman(&self.tokens, est_bytes);
+            encoded
+        }
     }
 
     /// Compress using only fixed Huffman codes (for very small inputs).
@@ -989,7 +1026,15 @@ impl Deflater {
         self.lz77.compress_into(data, &mut self.tokens);
 
         let est_bytes = estimated_deflate_size(data.len(), self.level);
-        let (deflated, _) = encode_best_huffman(&self.tokens, est_bytes);
+        let use_split = self.level >= 5
+            && data.len() > SMALL_INPUT_BYTES
+            && data.len() <= BLOCK_SPLIT_SIZE_LIMIT;
+        let deflated = if use_split {
+            encode_with_block_splitting(&self.tokens, DEFAULT_MAX_BLOCKS)
+        } else {
+            let (deflated, _) = encode_best_huffman(&self.tokens, est_bytes);
+            deflated
+        };
 
         let use_stored = should_use_stored(data.len(), deflated.len());
 
