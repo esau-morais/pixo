@@ -1,19 +1,27 @@
 # Comprehensive Benchmark Report
 
-Last updated: December 2025
+Last updated: December 25, 2025
 
 This document provides a comprehensive comparison of comprs against other image compression tools, helping you make informed decisions based on your specific requirements.
 
 ## Environment
 
-- **Host**: Apple Silicon (M-series) / x86_64
+### Primary Benchmark Environment (x86_64 Linux Cloud)
+
+- **Host**: Intel Xeon @ 2.90GHz (4 cores), 16GB RAM
+- **OS**: Linux 6.12.58+
 - **Toolchain**: rustc 1.88.0 (release) for comprs
-- **SIMD**: ARM64 NEON on Apple Silicon, AVX2/SSE on x86_64
+- **SIMD**: AVX-512, AVX2, SSE4.2 (runtime detected)
+- **Benchmark command**: `cargo bench --bench comparison`
+
+### Reference Environment (Apple Silicon)
+
+- **Host**: Apple Silicon (M-series)
+- **SIMD**: ARM64 NEON
 - **External binaries** (for reference comparisons):
   - oxipng: Homebrew install, `-o4 --strip safe`
   - mozjpeg cjpeg: Homebrew install, `-quality 85 -optimize -progressive`
   - pngquant: Homebrew install, `--quality=65-80 --speed=4` (lossy PNG)
-- **Benchmark command**: `cargo bench --bench comparison`
 
 ---
 
@@ -51,12 +59,14 @@ Test images include both synthetic patterns (gradient, flat blocks) and real pho
 
 All encoders tested at **compression level 6** with adaptive filtering for a fair comparison.
 
-### Synthetic Images (512×512)
+### Synthetic Images (512×512 Gradient)
 
-| Image Type  | comprs         | image crate     | lodepng        | Winner         |
-| ----------- | -------------- | --------------- | -------------- | -------------- |
-| Gradient    | 7.6 KB / 2.4ms | 76.8 KB / 0.6ms | 7.5 KB / 1.8ms | lodepng (size) |
-| Flat Blocks | 0.4 KB / 2.5ms | 0.5 KB / 0.5ms  | 0.4 KB / 3.3ms | Tie            |
+| Encoder         | Size     | Time     | Notes                      |
+| --------------- | -------- | -------- | -------------------------- |
+| comprs Fast     | 10.9 KB  | 4.4 ms   | level=2, AdaptiveFast      |
+| comprs Balanced | 10.1 KB  | 9.0 ms   | level=6, Adaptive filter   |
+| comprs Max      | 5.0 KB   | 32.4 s   | level=9, MinSum, optimal   |
+| image crate     | 76.8 KB  | 0.77 ms  | default PngEncoder         |
 
 ### Real Images (Kodak Photos)
 
@@ -67,8 +77,8 @@ All encoders tested at **compression level 6** with adaptive filtering for a fai
 
 **Key Findings:**
 
-- comprs and lodepng produce **nearly identical file sizes** at level 6
-- comprs is **2-3× slower** than image crate but produces **10× smaller files**
+- comprs Balanced produces **7.6× smaller files** than image crate (10.1 KB vs 76.8 KB)
+- comprs Fast is only **5.7× slower** than image crate but produces **7× smaller files**
 - lodepng (C library) is slightly faster than comprs but requires native bindings
 
 ---
@@ -77,12 +87,14 @@ All encoders tested at **compression level 6** with adaptive filtering for a fai
 
 All encoders tested at **quality 85, 4:2:0 subsampling, baseline mode** for fair comparison.
 
-### Synthetic Images (512×512)
+### Synthetic Images (512×512 Gradient)
 
-| Image Type  | comprs          | image crate     | jpeg-encoder    | Winner               |
-| ----------- | --------------- | --------------- | --------------- | -------------------- |
-| Gradient    | 17.3 KB / 1.6ms | 16.7 KB / 1.5ms | 17.4 KB / 0.9ms | jpeg-encoder (speed) |
-| Flat Blocks | 3.5 KB / 1.5ms  | 3.4 KB / 1.4ms  | 3.5 KB / 0.8ms  | jpeg-encoder (speed) |
+| Encoder         | Size     | Time     | Notes                              |
+| --------------- | -------- | -------- | ---------------------------------- |
+| comprs Fast     | 17.3 KB  | 6.0 ms   | 4:4:4, baseline, no optimization   |
+| comprs Balanced | 17.7 KB  | 11.2 ms  | 4:4:4, Huffman optimization        |
+| comprs Max      | 10.5 KB  | 28.8 ms  | 4:2:0, progressive, trellis        |
+| image crate     | 16.7 KB  | 6.1 ms   | quality 85, default settings       |
 
 ### Real Images (Kodak Photos)
 
@@ -93,8 +105,8 @@ All encoders tested at **quality 85, 4:2:0 subsampling, baseline mode** for fair
 
 **Key Findings:**
 
-- All three encoders produce **nearly identical file sizes** at equivalent settings
-- jpeg-encoder is **~2× faster** due to SIMD optimizations in baseline mode
+- All baseline encoders produce **nearly identical file sizes** at equivalent settings
+- comprs Max achieves **37% smaller files** (10.5 KB vs 16.7 KB) with progressive + trellis
 - comprs's advantage comes from **advanced features** (progressive, trellis, Huffman optimization)
 
 ---
@@ -105,33 +117,33 @@ All libraries tested at **compression level 6** on 1 MB payloads.
 
 ### Compressible Data (repeating text pattern)
 
-| Library    | Output Size | Ratio  | Throughput  | Notes                |
-| ---------- | ----------- | ------ | ----------- | -------------------- |
-| **comprs** | 3.0 KB      | 336.6× | 865 MiB/s   | Pure Rust, zero deps |
-| libdeflate | 3.1 KB      | 332.4× | 4,265 MiB/s | C library, fastest   |
-| flate2     | 6.0 KB      | 169.9× | 989 MiB/s   | miniz_oxide backend  |
+| Library    | Output Size | Ratio  | Time     | Throughput  | Notes                |
+| ---------- | ----------- | ------ | -------- | ----------- | -------------------- |
+| **comprs** | 3.0 KB      | 336.6× | 3.65 ms  | 274 MiB/s   | Pure Rust, zero deps |
+| libdeflate | 3.1 KB      | 332.4× | 1.50 ms  | 666 MiB/s   | C library            |
+| flate2     | 6.0 KB      | 169.9× | 0.30 ms  | 3,207 MiB/s | miniz_oxide backend  |
 
 ### Random Data (incompressible)
 
-| Library    | Output Size | Ratio | Throughput | Notes       |
-| ---------- | ----------- | ----- | ---------- | ----------- |
-| **comprs** | 1.0 MB      | 1.0×  | 185 MiB/s  | Pure Rust   |
-| libdeflate | 1.0 MB      | 1.0×  | 94 MiB/s   | C library   |
-| flate2     | 1.0 MB      | 1.0×  | 67 MiB/s   | miniz_oxide |
+| Library    | Output Size | Ratio | Time     | Throughput | Notes       |
+| ---------- | ----------- | ----- | -------- | ---------- | ----------- |
+| **comprs** | 1.0 MB      | 1.0×  | 7.35 ms  | 136 MiB/s  | Pure Rust   |
+| libdeflate | 1.0 MB      | 1.0×  | 11.65 ms | 86 MiB/s   | C library   |
+| flate2     | 1.0 MB      | 1.0×  | 21.6 ms  | 46 MiB/s   | miniz_oxide |
 
 ### Max Compression (Zopfli comparison, 64 KB data)
 
 | Library        | Output Size | Time   | Notes                              |
 | -------------- | ----------- | ------ | ---------------------------------- |
-| comprs (lvl 9) | 146 B       | 91 µs  | Fast, good compression             |
-| **zopfli**     | 189 B       | 222 ms | Best compression, **2400× slower** |
+| comprs (lvl 9) | 146 B       | 272 µs | Fast, good compression             |
+| **zopfli**     | 189 B       | 646 ms | Best compression, **2375× slower** |
 
 **Key Findings:**
 
 - comprs achieves **2× better compression ratio** than flate2 on compressible data
-- libdeflate is **5× faster** but requires C bindings
-- comprs is **2.75× faster** than flate2 on random data
-- zopfli achieves only ~1.5% better compression but is **2400× slower**
+- libdeflate is **2.4× faster** on compressible data but requires C bindings
+- comprs is **2.9× faster** than flate2 on random data, **1.6× faster** than libdeflate
+- zopfli achieves only ~1.5% better compression but is **2375× slower**
 
 ---
 
@@ -190,12 +202,12 @@ Testing on actual images from the test fixtures:
 
 Gradient images are a **worst-case scenario** for quantization because they contain many unique colors that require dithering, making compression less effective.
 
-| Encoder         | Size    | Time     | Notes                              |
-| --------------- | ------- | -------- | ---------------------------------- |
-| comprs Lossless | 7.6 KB  | 5.46 ms  | Baseline (no quantization)         |
-| comprs Lossy    | 5.4 KB  | 8.18 ms  | 256 colors, no dithering (-29%)    |
-| imagequant      | 64.2 KB | 36.38 ms | libimagequant (dithered, larger)   |
-| pngquant        | 61.6 KB | 54.32 ms | --quality=65-80 (dithered, larger) |
+| Encoder         | Size    | Time      | Notes                              |
+| --------------- | ------- | --------- | ---------------------------------- |
+| comprs Lossless | 10.1 KB | 9.0 ms    | Baseline (no quantization)         |
+| comprs Lossy    | 5.9 KB  | 19.7 ms   | 256 colors, no dithering (-41.5%)  |
+| imagequant      | 64.4 KB | 89.7 ms   | libimagequant (dithered, larger)   |
+| pngquant        | 61.6 KB | ~55 ms    | --quality=65-80 (dithered, larger) |
 
 > **Note**: On gradient images, the dithering applied by imagequant/pngquant creates noise patterns that are harder to compress with DEFLATE. comprs's simpler median-cut without dithering produces better results for this edge case.
 
@@ -397,22 +409,37 @@ cargo build --release
 cargo build --release --no-default-features --features simd
 ```
 
+### Component Micro-benchmarks (x86_64 Linux Cloud)
+
+These micro-benchmarks measure individual comprs components:
+
+| Component                  | Throughput   | Time      | Notes                          |
+| -------------------------- | ------------ | --------- | ------------------------------ |
+| LZ77 compress (1MB text)   | 298 MiB/s    | 3.35 ms   | Level 6, compressible data     |
+| LZ77 compress (1MB random) | 419 MiB/s    | 2.38 ms   | Level 6, incompressible data   |
+| PNG filters (512×512 RGB)  | 697 MiB/s    | 1.08 ms   | Adaptive filter selection      |
+| PNG filters (fast)         | 586 MiB/s    | 1.28 ms   | AdaptiveFast filter            |
+| Adler-32 checksum (1MB)    | 10.6 GiB/s   | 92 µs     | SIMD-accelerated (AVX2)        |
+| CRC32 checksum (1MB)       | 1.68 GiB/s   | 580 µs    | Slicing-by-8 (software)        |
+| Huffman encode (fixed)     | 159 Melem/s  | 6.6 µs    | Fixed Huffman tables           |
+| Huffman encode (dynamic)   | 65 Melem/s   | 16.1 µs   | Dynamic Huffman tables         |
+
 ---
 
 ## 11. Recommendations: When to Use Which Tool
 
-### Performance Summary (Apple Silicon M-series)
+### Performance Summary (x86_64 Linux Cloud - Intel Xeon @ 2.90GHz)
 
-| Operation                   | comprs            | Competitor                  | Result                        |
-| --------------------------- | ----------------- | --------------------------- | ----------------------------- |
-| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | flate2: 1.0 ms, 6.0 KB      | **2× better compression**     |
-| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | libdeflate: 0.23 ms, 3.1 KB | libdeflate 5× faster          |
-| DEFLATE (random 1MB)        | 5.4 ms, 185 MiB/s | flate2: 14.9 ms, 67 MiB/s   | **comprs 2.75× faster**       |
-| PNG 512×512 (level 6)       | 2.4 ms, 7.6 KB    | lodepng: 1.8 ms, 7.5 KB     | Tie (lodepng slightly faster) |
-| PNG 512×512 (level 6)       | 2.4 ms, 7.6 KB    | image: 0.6 ms, 76.8 KB      | **10× smaller output**        |
-| PNG 512×512 Balanced        | 5.2 ms, 7.6 KB    | oxipng: 100 ms, 4.3 KB      | **19× faster**                |
-| JPEG 512×512 (Q85 baseline) | 1.6 ms, 17.3 KB   | jpeg-encoder: 0.9 ms        | jpeg-encoder 1.8× faster      |
-| JPEG 512×512 Max            | 9.1 ms, 10.5 KB   | mozjpeg: 10.0 ms, 8.2 KB    | Comparable speed              |
+| Operation                   | comprs              | Competitor                   | Result                       |
+| --------------------------- | ------------------- | ---------------------------- | ---------------------------- |
+| DEFLATE (compressible 1MB)  | 3.65 ms, 3.0 KB     | flate2: 0.30 ms, 6.0 KB      | **2× better compression**    |
+| DEFLATE (compressible 1MB)  | 3.65 ms, 3.0 KB     | libdeflate: 1.50 ms, 3.1 KB  | libdeflate 2.4× faster       |
+| DEFLATE (random 1MB)        | 7.35 ms, 136 MiB/s  | flate2: 21.6 ms, 46 MiB/s    | **comprs 2.9× faster**       |
+| DEFLATE (random 1MB)        | 7.35 ms, 136 MiB/s  | libdeflate: 11.65 ms, 86 MiB/s | **comprs 1.6× faster**     |
+| PNG 512×512 Balanced        | 9.0 ms, 10.1 KB     | image: 0.77 ms, 76.8 KB      | **7.6× smaller output**      |
+| PNG 512×512 Fast            | 4.4 ms, 10.9 KB     | image: 0.77 ms, 76.8 KB      | **7× smaller, 5.7× slower**  |
+| JPEG 512×512 (Q85 baseline) | 6.0 ms, 17.3 KB     | image: 6.1 ms, 16.7 KB       | Comparable                   |
+| JPEG 512×512 Max            | 28.8 ms, 10.5 KB    | image: 6.1 ms, 16.7 KB       | **37% smaller output**       |
 
 ### Decision Matrix by Primary Constraint
 
