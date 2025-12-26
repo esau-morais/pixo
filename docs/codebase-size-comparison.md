@@ -501,7 +501,7 @@ compiled to WebAssembly via Emscripten.
 
 | Metric             | pixo        | sharp              | squoosh               |
 | ------------------ | ----------- | ------------------ | --------------------- |
-| Bundle size (WASM) | **146 KB**  | N/A (native)       | ~2.1 MB               |
+| Bundle size (WASM) | **147 KB**  | N/A (native)       | ~2.1 MB               |
 | Dependencies       | 0           | libvips (194K LOC) | mozjpeg, oxipng, etc. |
 | Formats            | PNG, JPEG   | 10+                | 6                     |
 | Build complexity   | cargo build | Native compilation | Emscripten            |
@@ -614,7 +614,7 @@ compiled to WebAssembly via Emscripten.
 | Zero dependencies    | Yes                       | jpeg-encoder (JPEG only) | **Unique for PNG+JPEG** |
 | Codebase size        | 7,893 LOC                 | jpeg-encoder (2,846)     | Compact for scope       |
 | Compression quality  | 4-5% vs mozjpeg           | mozjpeg                  | Good tradeoff           |
-| WASM binary          | 146 KB                    | squoosh (~2 MB)          | **Excellent**           |
+| WASM binary          | 147 KB                    | squoosh (~2 MB)          | **Excellent**           |
 | Build simplicity     | cargo build               | sharp (native build)     | **Excellent**           |
 
 ### The AI-Assisted Advantage
@@ -635,7 +635,7 @@ The tradeoff is:
 
 | Use Case                    | Recommendation                                  |
 | --------------------------- | ----------------------------------------------- |
-| Web application (WASM)      | ✅ pixo (146 KB binary)                         |
+| Web application (WASM)      | ✅ pixo (147 KB binary)                         |
 | Zero native dependencies    | ✅ pixo (cargo add only)                        |
 | Maximum compression         | ❌ Use mozjpeg/oxipng                           |
 | Node.js server              | ❌ Use sharp (faster native)                    |

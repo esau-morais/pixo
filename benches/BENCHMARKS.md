@@ -186,7 +186,7 @@ Testing on actual images from the test fixtures:
 - On images with solid colors/flat areas (rocket.png), **pixo wins by 28%**
 - On complex photographic images, pngquant's libimagequant produces smaller files
 - Both achieve **50-80% reduction** compared to lossless PNG
-- pixo has zero external dependencies (146 KB WASM vs pngquant's native binary)
+- pixo has zero external dependencies (147 KB WASM vs pngquant's native binary)
 
 ### Synthetic Benchmark (512×512 gradient)
 
@@ -209,7 +209,7 @@ Gradient images are a **worst-case scenario** for quantization because they cont
 | **Images with flat colors/UI**      | pixo Lossy often beats pngquant            |
 | **Complex photos, max compression** | pngquant produces smaller files            |
 | **Icons and logos (<256 colors)**   | Use lossless - already optimized           |
-| **WASM bundle size matters**        | pixo Lossy (no external deps, 146 KB WASM) |
+| **WASM bundle size matters**        | pixo Lossy (no external deps, 147 KB WASM) |
 
 ### Lossy PNG Settings
 
@@ -259,7 +259,7 @@ Critical for web applications where bundle size impacts load time.
 
 | Library         | WASM Size  | Notes                               |
 | --------------- | ---------- | ----------------------------------- |
-| **pixo**        | **146 KB** | Zero deps, pure Rust, lossy PNG [1] |
+| **pixo**        | **147 KB** | Zero deps, pure Rust, lossy PNG [1] |
 | wasm-mozjpeg    | ~208 KB    | Emscripten compiled                 |
 | squoosh oxipng  | ~625 KB    | Google's Squoosh codec              |
 | squoosh mozjpeg | ~803 KB    | Google's Squoosh codec              |
@@ -278,7 +278,7 @@ panic = "abort"      # Remove unwinding code
 strip = true         # Strip symbols
 ```
 
-Build command for the 146 KB binary:
+Build command for the 147 KB binary:
 
 ```bash
 cargo build --target wasm32-unknown-unknown --release --no-default-features --features wasm,simd
@@ -299,7 +299,7 @@ Comparison of Rust image compression libraries.
 
 | Library        | WASM-friendly   | Binary Size  | Throughput | SIMD Support | Notes                                          |
 | -------------- | --------------- | ------------ | ---------- | ------------ | ---------------------------------------------- |
-| **pixo**       | Yes             | ~146 KB      | Excellent  | NEON + AVX2  | Zero deps, pure Rust, lossy PNG, parallel JPEG |
+| **pixo**       | Yes             | ~147 KB      | Excellent  | NEON + AVX2  | Zero deps, pure Rust, lossy PNG, parallel JPEG |
 | `image`        | Yes             | ~2-4 MB      | Good       | Limited      | Pure Rust, many codecs included                |
 | `jpeg-encoder` | Yes             | ~50 KB       | Excellent  | AVX2         | Pure Rust JPEG encoder, SIMD optimized         |
 | `lodepng`      | No (C bindings) | N/A          | Excellent  | No           | C lodepng library bindings                     |
@@ -421,7 +421,7 @@ cargo build --release --no-default-features --features simd
 
 | If you need...             | PNG                 | JPEG                | Why                                |
 | -------------------------- | ------------------- | ------------------- | ---------------------------------- |
-| Smallest WASM binary       | pixo (146 KB)       | pixo (146 KB)       | 4× smaller than Squoosh            |
+| Smallest WASM binary       | pixo (147 KB)       | pixo (147 KB)       | 4× smaller than Squoosh            |
 | Best lossless compression  | oxipng              | N/A                 | Gold standard, but larger binaries |
 | Best lossy PNG compression | pixo Lossy/pngquant | N/A                 | 50-80% smaller than lossless       |
 | Fastest encoding           | pixo Fast or image  | pixo Fast           | Minimal overhead                   |
@@ -452,7 +452,7 @@ Even "Rust" libraries often delegate the heavy lifting to C. oxipng's compressio
 
 1. **Portability**: pixo compiles to WASM without Emscripten. No C toolchain needed. Works identically on every platform.
 
-2. **Tiny binaries**: 146 KB WASM binary vs 600-800 KB for Squoosh codecs. This matters for web apps where every kilobyte counts.
+2. **Tiny binaries**: 147 KB WASM binary vs 600-800 KB for Squoosh codecs. This matters for web apps where every kilobyte counts.
 
 3. **Auditability**: One language, one codebase. No FFI boundaries to cross, no C memory safety concerns.
 
@@ -474,7 +474,7 @@ These gaps are the cost of independence. For many use cases—especially web app
 
 | Scenario                                     | Recommendation                                        |
 | -------------------------------------------- | ----------------------------------------------------- |
-| **Building a web app with WASM?**            | Use pixo (146 KB binary, good compression)            |
+| **Building a web app with WASM?**            | Use pixo (147 KB binary, good compression)            |
 | **Need smallest PNG file size?**             | Use pixo Lossy (50-80% smaller than lossless)         |
 | **Want zero native dependencies?**           | Use pixo (pure Rust, no C toolchain)                  |
 | **Need predictable output across browsers?** | Use pixo (identical output everywhere)                |

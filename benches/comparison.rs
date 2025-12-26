@@ -1416,7 +1416,7 @@ fn print_summary_report() {
     let pixo_wasm_size = get_wasm_size();
     let pixo_size_str = match pixo_wasm_size {
         Some(size) => format_size(size),
-        None => "146 KB".to_string(),
+        None => "147 KB".to_string(),
     };
 
     println!(
