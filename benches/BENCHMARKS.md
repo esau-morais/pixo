@@ -140,13 +140,13 @@ All libraries tested at **compression level 6** on 1 MB payloads.
 
 Comparing pixo presets against oxipng and the image crate. All columns show **size / time**.
 
-| Image                       | Dimensions | pixo Fast       | pixo Balanced   | pixo Max       | oxipng         | image crate     | Delta vs oxipng    |
-| --------------------------- | ---------- | --------------- | --------------- | -------------- | -------------- | --------------- | ------------------ |
-| Gradient (512×512)          | 512×512    | 10.9 KB / 1.7ms | 10.1 KB / 4.6ms | 5.0 KB / 23.0s | 4.3 KB / 112ms | 76.8 KB / 0.7ms | +134.7% (Balanced) |
-| playground.png              | 1460×1080  | 1.41 MB / 0.4s  | 1.28 MB / 0.2s  | 1.27 MB / 77s  | 1.08 MB / 2.1s | ~1.4 MB / 0.3s  | +17.5%             |
-| squoosh_example.png         | 1460×1280  | 2.26 MB / 0.2s  | 1.84 MB / 0.4s  | 1.77 MB / 41s  | 1.56 MB / 1.8s | ~2.0 MB / 0.4s  | +13.9%             |
-| squoosh_example_palette.png | 800×600    | 262 KB / 48ms   | 144 KB / 45ms   | 141 KB / 2.8s  | 102 KB / 0.9s  | ~180 KB / 50ms  | +39.0%             |
-| rocket.png                  | 800×600    | 1.64 MB / 0.1s  | 1.33 MB / 0.2s  | 1.32 MB / 15s  | 1.22 MB / 1.2s | ~1.5 MB / 0.2s  | +7.7%              |
+| Image                       | Dimensions | pixo Fast        | pixo Balanced    | pixo Max       | oxipng           | image crate      | Delta vs oxipng    |
+| --------------------------- | ---------- | ---------------- | ---------------- | -------------- | ---------------- | ---------------- | ------------------ |
+| Gradient (512×512)          | 512×512    | 10.9 KB / 1.60ms | 10.1 KB / 4.51ms | 5.0 KB / 22.5s | 4.3 KB / 101.9ms | 76.8 KB / 0.67ms | +134.7% (Balanced) |
+| playground.png              | 1460×1080  | 1.41 MB / 0.4s   | 1.28 MB / 0.2s   | 1.27 MB / 77s  | 1.08 MB / 2.1s   | ~1.4 MB / 0.3s   | +17.5%             |
+| squoosh_example.png         | 1460×1280  | 2.26 MB / 0.2s   | 1.84 MB / 0.4s   | 1.77 MB / 41s  | 1.56 MB / 1.8s   | ~2.0 MB / 0.4s   | +13.9%             |
+| squoosh_example_palette.png | 800×600    | 262 KB / 48ms    | 144 KB / 45ms    | 141 KB / 2.8s  | 102 KB / 0.9s    | ~180 KB / 50ms   | +39.0%             |
+| rocket.png                  | 800×600    | 1.64 MB / 0.1s   | 1.33 MB / 0.2s   | 1.32 MB / 15s  | 1.22 MB / 1.2s   | ~1.5 MB / 0.2s   | +7.7%              |
 
 ### PNG Preset Summary
 
@@ -192,12 +192,12 @@ Testing on actual images from the test fixtures:
 
 Gradient images are a **worst-case scenario** for quantization because they contain many unique colors that require dithering, making compression less effective.
 
-| Encoder       | Size    | Time    | Notes                              |
-| ------------- | ------- | ------- | ---------------------------------- |
-| pixo Lossless | 10.1 KB | 4.61 ms | Baseline (no quantization)         |
-| pixo Lossy    | 4.4 KB  | 11.6 ms | 256 colors, no dithering (-56.5%)  |
-| imagequant    | 64.4 KB | 40.6 ms | libimagequant (dithered, larger)   |
-| pngquant      | 61.6 KB | 62.4 ms | --quality=65-80 (dithered, larger) |
+| Encoder       | Size    | Time     | Notes                              |
+| ------------- | ------- | -------- | ---------------------------------- |
+| pixo Lossless | 10.1 KB | 4.51 ms  | Baseline (no quantization)         |
+| pixo Lossy    | 4.4 KB  | 11.36 ms | 256 colors, no dithering (-56.5%)  |
+| imagequant    | 64.4 KB | 40.04 ms | libimagequant (dithered, larger)   |
+| pngquant      | 61.6 KB | 55.40 ms | --quality=65-80 (dithered, larger) |
 
 > **Note**: On gradient images, the dithering applied by imagequant/pngquant creates noise patterns that are harder to compress with DEFLATE. pixo's median-cut with perceptual weighting and K-means refinement produces better results for this edge case.
 
@@ -225,13 +225,13 @@ Gradient images are a **worst-case scenario** for quantization because they cont
 
 Comparing pixo presets against mozjpeg and the image crate. All columns show **size / time**.
 
-| Image              | Dimensions | pixo Fast       | pixo Balanced   | pixo Max         | mozjpeg          | image crate     | Delta vs mozjpeg |
-| ------------------ | ---------- | --------------- | --------------- | ---------------- | ---------------- | --------------- | ---------------- |
-| Gradient (512×512) | 512×512    | 17.3 KB / 1.8ms | 17.7 KB / 3.4ms | 10.5 KB / 11.8ms | 8.2 KB / 15.7ms  | 16.7 KB / 1.5ms | **+28.3%** (Max) |
-| multi-agent.jpg    | 2300×1342  | 435.9KB / 94ms  | 435.9KB / 181ms | 368.0KB / 251ms  | 352.3KB / ~200ms | ~480KB / ~100ms | **+4.4%**        |
-| browser.jpg        | 2300×1342  | 383.4KB / 94ms  | 383.4KB / 179ms | 309.7KB / 253ms  | 297.2KB / ~200ms | ~420KB / ~100ms | **+4.2%**        |
-| review.jpg         | 2300×1342  | 405.9KB / 94ms  | 405.9KB / 181ms | 334.3KB / 251ms  | 317.9KB / ~200ms | ~450KB / ~100ms | **+5.2%**        |
-| web.jpg            | 3220×1812  | 664.3KB / 177ms | 664.3KB / 339ms | 547.1KB / 474ms  | 518.5KB / ~350ms | ~730KB / ~180ms | **+5.5%**        |
+| Image              | Dimensions | pixo Fast        | pixo Balanced    | pixo Max         | mozjpeg          | image crate      | Delta vs mozjpeg |
+| ------------------ | ---------- | ---------------- | ---------------- | ---------------- | ---------------- | ---------------- | ---------------- |
+| Gradient (512×512) | 512×512    | 17.3 KB / 1.81ms | 17.7 KB / 3.36ms | 10.5 KB / 7.05ms | 8.2 KB / 10.36ms | 16.7 KB / 1.45ms | **+28.3%** (Max) |
+| multi-agent.jpg    | 2300×1342  | 435.9KB / 94ms   | 435.9KB / 181ms  | 368.0KB / 251ms  | 352.3KB / ~200ms | ~480KB / ~100ms  | **+4.4%**        |
+| browser.jpg        | 2300×1342  | 383.4KB / 94ms   | 383.4KB / 179ms  | 309.7KB / 253ms  | 297.2KB / ~200ms | ~420KB / ~100ms  | **+4.2%**        |
+| review.jpg         | 2300×1342  | 405.9KB / 94ms   | 405.9KB / 181ms  | 334.3KB / 251ms  | 317.9KB / ~200ms | ~450KB / ~100ms  | **+5.2%**        |
+| web.jpg            | 3220×1812  | 664.3KB / 177ms  | 664.3KB / 339ms  | 547.1KB / 474ms  | 518.5KB / ~350ms | ~730KB / ~180ms  | **+5.5%**        |
 
 ### JPEG Preset Summary
 
@@ -406,16 +406,16 @@ cargo build --release --no-default-features --features simd
 
 ### Performance Summary (Apple Silicon M-series)
 
-| Operation                   | pixo              | Competitor                  | Result                      |
-| --------------------------- | ----------------- | --------------------------- | --------------------------- |
-| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | flate2: 1.0 ms, 6.0 KB      | **2× better compression**   |
-| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | libdeflate: 0.23 ms, 3.1 KB | libdeflate 5× faster        |
-| DEFLATE (random 1MB)        | 5.4 ms, 185 MiB/s | flate2: 14.9 ms, 67 MiB/s   | **pixo 2.75× faster**       |
-| PNG 512×512 (level 6)       | 1.8 ms, 7.6 KB    | lodepng: 1.8 ms, 7.5 KB     | Tie (identical performance) |
-| PNG 512×512 (level 6)       | 1.8 ms, 7.6 KB    | image: 0.6 ms, 76.8 KB      | **10× smaller output**      |
-| PNG 512×512 Balanced        | 4.6 ms, 10.1 KB   | oxipng: 112 ms, 4.3 KB      | **24× faster**              |
-| JPEG 512×512 (Q85 baseline) | 1.2 ms, 17.3 KB   | jpeg-encoder: 1.0 ms        | jpeg-encoder 1.2× faster    |
-| JPEG 512×512 Max            | 11.8 ms, 10.5 KB  | mozjpeg: 15.7 ms, 8.2 KB    | **pixo 1.3× faster**        |
+| Operation                   | pixo              | Competitor                  | Result                    |
+| --------------------------- | ----------------- | --------------------------- | ------------------------- |
+| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | flate2: 1.0 ms, 6.0 KB      | **2× better compression** |
+| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | libdeflate: 0.23 ms, 3.1 KB | libdeflate 5× faster      |
+| DEFLATE (random 1MB)        | 5.4 ms, 185 MiB/s | flate2: 14.9 ms, 67 MiB/s   | **pixo 2.75× faster**     |
+| PNG 512×512 (level 6)       | 1.60 ms, 10.9 KB  | lodepng: ~1.8 ms, ~7.5 KB   | Similar performance       |
+| PNG 512×512 (level 6)       | 1.60 ms, 10.9 KB  | image: 0.67 ms, 76.8 KB     | **7× smaller output**     |
+| PNG 512×512 Balanced        | 4.51 ms, 10.1 KB  | oxipng: 101.9 ms, 4.3 KB    | **22× faster**            |
+| JPEG 512×512 (Q85 baseline) | 1.81 ms, 17.3 KB  | image: 1.45 ms, 16.7 KB     | image 1.25× faster        |
+| JPEG 512×512 Max            | 7.05 ms, 10.5 KB  | mozjpeg: 10.36 ms, 8.2 KB   | **pixo 1.47× faster**     |
 
 ### Decision Matrix by Primary Constraint
 
@@ -451,22 +451,19 @@ Even "Rust" libraries often delegate the heavy lifting to C. oxipng's compressio
 #### Why Pure Rust Matters
 
 1. **Portability**: pixo compiles to WASM without Emscripten. No C toolchain needed. Works identically on every platform.
-
 2. **Tiny binaries**: 152 KB WASM binary vs 600-800 KB for Squoosh codecs. This matters for web apps where every kilobyte counts.
-
 3. **Auditability**: One language, one codebase. No FFI boundaries to cross, no C memory safety concerns.
-
 4. **Simplicity**: `cargo add pixo` just works. No system dependencies, no build scripts, no linking headaches.
 
 #### The Tradeoffs
 
 Being pure Rust with zero dependencies means accepting some compression ratio gaps:
 
-| Comparison            | Gap    | Root Cause                                    |
-| --------------------- | ------ | --------------------------------------------- |
-| PNG Max vs oxipng     | +8-17% | libdeflate has 20+ years of C optimization    |
-| JPEG Max vs mozjpeg   | +4-5%  | mozjpeg has sophisticated trellis refinement  |
-| Lossy PNG vs pngquant | +13%   | libimagequant uses 100+ k-means iterations    |
+| Comparison            | Gap    | Root Cause                                   |
+| --------------------- | ------ | -------------------------------------------- |
+| PNG Max vs oxipng     | +8-17% | libdeflate has 20+ years of C optimization   |
+| JPEG Max vs mozjpeg   | +4-5%  | mozjpeg has sophisticated trellis refinement |
+| Lossy PNG vs pngquant | +13%   | libimagequant uses 100+ k-means iterations   |
 
 These gaps are the cost of independence. For many use cases—especially web applications where binary size matters—the tradeoffs are worth it.
 

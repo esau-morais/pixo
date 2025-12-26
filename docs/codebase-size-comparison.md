@@ -42,8 +42,8 @@ This document provides a comprehensive comparison of codebase sizes between `pix
 | ------------- | --------- | -------- | --------- | -------- | ---------------------- |
 | mozjpeg       | 111,966   | C/ASM    | 30+ years | 50,623   | Industry gold standard |
 | libdeflate    | 14,429    | C        | 8+ years  | 2,371    | Fastest DEFLATE        |
-| lodepng       | 11,927    | C++      | 15+ years | 0        | Single-file PNG        |
-| libvips       | 194,229   | C        | 20+ years | N/A      | Full image processing  |
+| lodepng       | 11,927    | C        | 20 years  | 0        | Single-file PNG        |
+| libvips       | 194,229   | C        | 30 years  | N/A      | Full image processing  |
 | libimagequant | 5,850     | C/Rust   | 10+ years | N/A      | Color quantization     |
 | pngquant      | 1,912     | C/Rust   | 15+ years | N/A      | PNG optimizer          |
 
@@ -119,7 +119,7 @@ cloc . --exclude-dir=target,.git,node_modules
 git clone --depth 1 https://github.com/image-rs/image.git
 git clone --depth 1 https://github.com/image-rs/image-png.git
 git clone --depth 1 https://github.com/vstroebel/jpeg-encoder.git
-git clone --depth 1 https://github.com/shssoichiro/oxipng.git
+git clone --depth 1 https://github.com/oxipng/oxipng.git
 git clone --depth 1 https://github.com/zopfli-rs/zopfli.git
 git clone --depth 1 https://github.com/rust-lang/flate2-rs.git
 git clone --depth 1 https://github.com/Frommi/miniz_oxide.git
@@ -163,7 +163,7 @@ echo "$((total_loc / test_count)) LOC per test"
 | image         | https://github.com/image-rs/image           | Multi-format image processing     |
 | image-png     | https://github.com/image-rs/image-png       | PNG codec for image crate         |
 | jpeg-encoder  | https://github.com/vstroebel/jpeg-encoder   | Pure Rust JPEG encoder            |
-| oxipng        | https://github.com/shssoichiro/oxipng       | PNG optimizer (CLI/lib)           |
+| oxipng        | https://github.com/oxipng/oxipng            | PNG optimizer (CLI/lib)           |
 | zopfli        | https://github.com/zopfli-rs/zopfli         | Pure Rust Zopfli port             |
 | flate2-rs     | https://github.com/rust-lang/flate2-rs      | DEFLATE wrapper                   |
 | miniz_oxide   | https://github.com/Frommi/miniz_oxide       | Pure Rust DEFLATE                 |
@@ -199,9 +199,9 @@ Different libraries support different image formats, which affects their codebas
 | **pixo**     | ✓   | ✓    | -   | -    | -    | -    | -   | -                   | **2**         |
 | jpeg-encoder | -   | ✓    | -   | -    | -    | -    | -   | -                   | 1             |
 | image-png    | ✓   | -    | -   | -    | -    | -    | -   | -                   | 1             |
-| image        | ✓   | ✓    | ✓   | ✓    | ✓    | ✓    | ✓   | ICO, PNM, HDR, etc. | 12+           |
+| image        | ✓   | ✓    | ✓   | ✓    | ✓    | ✓    | ✓   | ICO, PNM, HDR, etc. | 15+           |
 | oxipng       | ✓   | -    | -   | -    | -    | -    | -   | -                   | 1             |
-| sharp        | ✓   | ✓    | ✓   | ✓    | ✓    | ✓    | -   | HEIF, JXL, etc.     | 10+           |
+| sharp        | ✓   | ✓    | ✓   | ✓    | ✓    | ✓    | -   | SVG (read-only)     | 6+            |
 | squoosh      | ✓   | ✓    | -   | ✓    | ✓    | -    | -   | QOI, JXL            | 6             |
 
 ### Format-Adjusted Size Comparison
@@ -211,8 +211,8 @@ When comparing libraries that support PNG+JPEG:
 | Library              | Core LOC | Formats | LOC per Format |
 | -------------------- | -------- | ------- | -------------- |
 | **pixo**             | 7,893    | 2       | **3,947**      |
-| image                | 21,571   | 12+     | ~1,800         |
-| sharp (excl libvips) | 4,196    | 10+     | ~420           |
+| image                | 21,571   | 15+     | ~1,438         |
+| sharp (excl libvips) | 4,196    | 6+      | ~700           |
 
 **Note**: `image` and `sharp` have lower LOC-per-format because they delegate to specialized codecs. `pixo` implements everything from scratch.
 
@@ -398,13 +398,13 @@ mod aarch64 {
 
 ### The Analysis
 
-| Metric     | pixo      | mozjpeg      | Ratio |
-| ---------- | --------- | ------------ | ----- |
-| Total LOC  | 18,788    | 111,966      | 1:6   |
-| Core codec | 7,893     | 68,129       | 1:9   |
-| SIMD       | 1,594     | 50,623       | 1:32  |
-| Test %     | 53.1%     | ~5%\*        | 11:1  |
-| Age        | 2024-2025 | 1991-present | -     |
+| Metric     | pixo   | mozjpeg      | Ratio |
+| ---------- | ------ | ------------ | ----- |
+| Total LOC  | 18,788 | 111,966      | 1:6   |
+| Core codec | 7,893  | 68,129       | 1:9   |
+| SIMD       | 1,594  | 50,623       | 1:32  |
+| Test %     | 53.1%  | ~5%\*        | 11:1  |
+| Age        | 2025   | 1991-present | -     |
 
 \* mozjpeg test code is minimal
 
@@ -455,7 +455,7 @@ mod aarch64 {
 The AI-assisted approach traded decades of low-level optimization for:
 
 - Modern safety guarantees
-- High test coverage (53.1% test ratio, 86% line coverage)
+- High test coverage (53.1% test ratio, 82% line coverage)
 - WASM compatibility
 - Maintainable codebase
 

@@ -192,6 +192,38 @@ mod tests {
     }
 
     #[test]
+    fn test_match_length_remainder_bytes() {
+        // Test the remainder path when match extends past 8-byte chunks
+        // Create data where match ends on a non-8-byte boundary
+        let data = b"abcdefghijklXXXXabcdefghijklYYYY";
+        // Positions 0 and 16 have matching first 12 bytes, then differ
+        assert_eq!(match_length(data, 0, 16, 16), 12);
+
+        // Test with exactly 3 matching bytes (less than 8)
+        let data2 = b"abcXXXXXabcYYYYY";
+        assert_eq!(match_length(data2, 0, 8, 8), 3);
+
+        // Test with 9 matching bytes (8 + 1 remainder)
+        let data3 = b"abcdefghiXXXXXXXabcdefghiYYYYYYY";
+        assert_eq!(match_length(data3, 0, 16, 16), 9);
+
+        // Test with 11 matching bytes (8 + 3 remainder)
+        let data4 = b"abcdefghijkXXXXXabcdefghijkYYYYY";
+        assert_eq!(match_length(data4, 0, 16, 16), 11);
+
+        // Test remainder path: data where all 8-byte chunks match,
+        // then remaining bytes also match (exercising line 85)
+        // max_len = 11 means we process 8 bytes, then need to check 3 remaining
+        let data5 = b"abcdefghijkabcdefghijk";
+        // Both positions have identical data, max_len limits the match
+        assert_eq!(match_length(data5, 0, 11, 11), 11);
+
+        // Test with max_len = 10: process 8 bytes, check 2 remaining that match
+        let data6 = b"1234567890123456789012345";
+        assert_eq!(match_length(data6, 0, 10, 10), 10);
+    }
+
+    #[test]
     fn test_score_filter_fallback() {
         // Score should sum absolute values treating bytes as signed
         assert_eq!(score_filter(&[0, 0, 0, 0]), 0);

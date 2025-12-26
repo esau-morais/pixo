@@ -5,6 +5,8 @@
 //! - CRC32 checksum (using PCLMULQDQ for hardware acceleration)
 //! - PNG filter operations
 //! - LZ77 match length comparison
+//! - JPEG DCT (Forward Discrete Cosine Transform) using AVX2
+//! - RGB to YCbCr color conversion using AVX2
 //!
 //! The implementations are architecture-specific and fall back to scalar
 //! implementations when SIMD is not available. Feature detection is cached
