@@ -53,23 +53,24 @@ All encoders tested at **compression level 6** with adaptive filtering for a fai
 
 ### Synthetic Images (512×512)
 
-| Image Type  | pixo           | image crate     | lodepng        | Winner         |
-| ----------- | -------------- | --------------- | -------------- | -------------- |
-| Gradient    | 7.6 KB / 2.4ms | 76.8 KB / 0.6ms | 7.5 KB / 1.8ms | lodepng (size) |
-| Flat Blocks | 0.4 KB / 2.5ms | 0.5 KB / 0.5ms  | 0.4 KB / 3.3ms | Tie            |
+| Image Type  | pixo           | image crate     | lodepng        | Winner             |
+| ----------- | -------------- | --------------- | -------------- | ------------------ |
+| Gradient    | 7.6 KB / 1.8ms | 76.8 KB / 0.6ms | 7.5 KB / 1.8ms | Tie (pixo/lodepng) |
+| Flat Blocks | 0.4 KB / 1.4ms | 0.5 KB / 0.5ms  | 0.4 KB / 3.2ms | pixo (speed)       |
 
 ### Real Images (Kodak Photos)
 
-| Image   | Dimensions | pixo          | image crate  | lodepng       | Winner             |
-| ------- | ---------- | ------------- | ------------ | ------------- | ------------------ |
-| kodim01 | 768×512    | 475 KB / 15ms | 673 KB / 3ms | 475 KB / 12ms | Tie (pixo/lodepng) |
-| kodim03 | 768×512    | 364 KB / 13ms | 497 KB / 3ms | 364 KB / 10ms | Tie (pixo/lodepng) |
+| Image   | Dimensions | pixo          | image crate    | lodepng         | Winner                  |
+| ------- | ---------- | ------------- | -------------- | --------------- | ----------------------- |
+| kodim01 | 768×512    | 475 KB / 43ms | 673 KB / 1.9ms | 475 KB / 19.8ms | Tie (pixo/lodepng size) |
+| kodim03 | 768×512    | 364 KB / 57ms | 497 KB / 1.9ms | 364 KB / 32ms   | Tie (pixo/lodepng size) |
 
 **Key Findings:**
 
 - pixo and lodepng produce **nearly identical file sizes** at level 6
-- pixo is **2-3× slower** than image crate but produces **10× smaller files**
-- lodepng (C library) is slightly faster than pixo but requires native bindings
+- pixo is **~20× slower** than image crate on large images but produces **10× smaller files**
+- pixo and lodepng have similar performance on synthetic images
+- lodepng (C library) is faster on real images but requires native bindings
 
 ---
 
@@ -81,15 +82,15 @@ All encoders tested at **quality 85, 4:2:0 subsampling, baseline mode** for fair
 
 | Image Type  | pixo            | image crate     | jpeg-encoder    | Winner               |
 | ----------- | --------------- | --------------- | --------------- | -------------------- |
-| Gradient    | 17.3 KB / 1.6ms | 16.7 KB / 1.5ms | 17.4 KB / 0.9ms | jpeg-encoder (speed) |
-| Flat Blocks | 3.5 KB / 1.5ms  | 3.4 KB / 1.4ms  | 3.5 KB / 0.8ms  | jpeg-encoder (speed) |
+| Gradient    | 17.3 KB / 1.2ms | 16.7 KB / 1.4ms | 17.4 KB / 1.0ms | jpeg-encoder (speed) |
+| Flat Blocks | 3.5 KB / 1.1ms  | 3.4 KB / 1.4ms  | 3.5 KB / 0.96ms | jpeg-encoder (speed) |
 
 ### Real Images (Kodak Photos)
 
-| Image   | Dimensions | pixo          | image crate   | jpeg-encoder  | Winner     |
-| ------- | ---------- | ------------- | ------------- | ------------- | ---------- |
-| kodim01 | 768×512    | 52.8 KB / 5ms | 53.0 KB / 5ms | 53.2 KB / 3ms | Tie (size) |
-| kodim03 | 768×512    | 39.2 KB / 5ms | 39.5 KB / 5ms | 39.4 KB / 3ms | Tie (size) |
+| Image   | Dimensions | pixo            | image crate     | jpeg-encoder    | Winner               |
+| ------- | ---------- | --------------- | --------------- | --------------- | -------------------- |
+| kodim01 | 768×512    | 52.8 KB / 3.3ms | 53.0 KB / 3.7ms | 53.2 KB / 2.2ms | jpeg-encoder (speed) |
+| kodim03 | 768×512    | 39.2 KB / 2.4ms | 39.5 KB / 2.8ms | 39.4 KB / 1.8ms | jpeg-encoder (speed) |
 
 **Key Findings:**
 
@@ -139,12 +140,13 @@ All libraries tested at **compression level 6** on 1 MB payloads.
 
 Comparing pixo presets against oxipng and the image crate. All columns show **size / time**.
 
-| Image                       | Dimensions | pixo Fast        | pixo Balanced    | pixo Max        | oxipng           | image crate   | Delta vs oxipng |
-| --------------------------- | ---------- | ---------------- | ---------------- | --------------- | ---------------- | ------------- | --------------- |
-| playground.png              | 1460×1080  | 1,475,576 / 0.4s | 1,340,919 / 0.2s | 1,332,458 / 77s | 1,134,213 / 2.1s | ~1.4MB / 0.3s | +17.5%          |
-| squoosh_example.png         | 1460×1280  | 2,366,900 / 0.2s | 1,928,383 / 0.4s | 1,859,691 / 41s | 1,633,408 / 1.8s | ~2.0MB / 0.4s | +13.9%          |
-| squoosh_example_palette.png | 800×600    | 268,636 / 48ms   | 147,626 / 45ms   | 144,855 / 2.8s  | 104,206 / 0.9s   | ~180KB / 50ms | +39.0%          |
-| rocket.png                  | 800×600    | 1,716,340 / 0.1s | 1,390,853 / 0.2s | 1,379,515 / 15s | 1,280,518 / 1.2s | ~1.5MB / 0.2s | +7.7%           |
+| Image                       | Dimensions | pixo Fast        | pixo Balanced    | pixo Max        | oxipng           | image crate     | Delta vs oxipng    |
+| --------------------------- | ---------- | ---------------- | ---------------- | --------------- | ---------------- | --------------- | ------------------ |
+| Gradient (512×512)          | 512×512    | 10.9 KB / 1.7ms  | 10.1 KB / 4.6ms  | 5.0 KB / 23.0s  | 4.3 KB / 112ms   | 76.8 KB / 0.7ms | +134.7% (Balanced) |
+| playground.png              | 1460×1080  | 1,475,576 / 0.4s | 1,340,919 / 0.2s | 1,332,458 / 77s | 1,134,213 / 2.1s | ~1.4MB / 0.3s   | +17.5%             |
+| squoosh_example.png         | 1460×1280  | 2,366,900 / 0.2s | 1,928,383 / 0.4s | 1,859,691 / 41s | 1,633,408 / 1.8s | ~2.0MB / 0.4s   | +13.9%             |
+| squoosh_example_palette.png | 800×600    | 268,636 / 48ms   | 147,626 / 45ms   | 144,855 / 2.8s  | 104,206 / 0.9s   | ~180KB / 50ms   | +39.0%             |
+| rocket.png                  | 800×600    | 1,716,340 / 0.1s | 1,390,853 / 0.2s | 1,379,515 / 15s | 1,280,518 / 1.2s | ~1.5MB / 0.2s   | +7.7%              |
 
 ### PNG Preset Summary
 
@@ -176,8 +178,8 @@ Testing on actual images from the test fixtures:
 
 | Image            | Dimensions | pixo Lossy | pngquant | Delta    | Winner   |
 | ---------------- | ---------- | ---------- | -------- | -------- | -------- |
-| avatar-color.png | 740×740    | 122.9 KB   | 113.1 KB | +9%      | pngquant |
-| rocket.png       | 1376×768   | 279.0 KB   | 392.9 KB | **-29%** | **pixo** |
+| avatar-color.png | 740×740    | 123.1 KB   | 113.1 KB | +9%      | pngquant |
+| rocket.png       | 1376×768   | 286.2 KB   | 392.9 KB | **-27%** | **pixo** |
 
 **Key findings:**
 
@@ -192,10 +194,10 @@ Gradient images are a **worst-case scenario** for quantization because they cont
 
 | Encoder       | Size    | Time     | Notes                              |
 | ------------- | ------- | -------- | ---------------------------------- |
-| pixo Lossless | 7.6 KB  | 5.46 ms  | Baseline (no quantization)         |
-| pixo Lossy    | 5.4 KB  | 8.18 ms  | 256 colors, no dithering (-29%)    |
-| imagequant    | 64.2 KB | 36.38 ms | libimagequant (dithered, larger)   |
-| pngquant      | 61.6 KB | 54.32 ms | --quality=65-80 (dithered, larger) |
+| pixo Lossless | 10.1 KB | 4.64 ms  | Baseline (no quantization)         |
+| pixo Lossy    | 5.9 KB  | 7.99 ms  | 256 colors, no dithering (-41.5%)  |
+| imagequant    | 64.4 KB | 40.72 ms | libimagequant (dithered, larger)   |
+| pngquant      | 61.6 KB | 56.46 ms | --quality=65-80 (dithered, larger) |
 
 > **Note**: On gradient images, the dithering applied by imagequant/pngquant creates noise patterns that are harder to compress with DEFLATE. pixo's simpler median-cut without dithering produces better results for this edge case.
 
@@ -223,12 +225,13 @@ Gradient images are a **worst-case scenario** for quantization because they cont
 
 Comparing pixo presets against mozjpeg and the image crate. All columns show **size / time**.
 
-| Image           | Dimensions | pixo Fast       | pixo Balanced   | pixo Max        | mozjpeg          | image crate     | Delta vs mozjpeg |
-| --------------- | ---------- | --------------- | --------------- | --------------- | ---------------- | --------------- | ---------------- |
-| multi-agent.jpg | 2300×1342  | 435.9KB / 94ms  | 435.9KB / 181ms | 368.0KB / 251ms | 352.3KB / ~200ms | ~480KB / ~100ms | **+4.4%**        |
-| browser.jpg     | 2300×1342  | 383.4KB / 94ms  | 383.4KB / 179ms | 309.7KB / 253ms | 297.2KB / ~200ms | ~420KB / ~100ms | **+4.2%**        |
-| review.jpg      | 2300×1342  | 405.9KB / 94ms  | 405.9KB / 181ms | 334.3KB / 251ms | 317.9KB / ~200ms | ~450KB / ~100ms | **+5.2%**        |
-| web.jpg         | 3220×1812  | 664.3KB / 177ms | 664.3KB / 339ms | 547.1KB / 474ms | 518.5KB / ~350ms | ~730KB / ~180ms | **+5.5%**        |
+| Image              | Dimensions | pixo Fast       | pixo Balanced   | pixo Max         | mozjpeg          | image crate     | Delta vs mozjpeg |
+| ------------------ | ---------- | --------------- | --------------- | ---------------- | ---------------- | --------------- | ---------------- |
+| Gradient (512×512) | 512×512    | 17.3 KB / 1.8ms | 17.7 KB / 3.4ms | 10.5 KB / 11.8ms | 8.2 KB / 15.7ms  | 16.7 KB / 1.5ms | **+28.3%** (Max) |
+| multi-agent.jpg    | 2300×1342  | 435.9KB / 94ms  | 435.9KB / 181ms | 368.0KB / 251ms  | 352.3KB / ~200ms | ~480KB / ~100ms | **+4.4%**        |
+| browser.jpg        | 2300×1342  | 383.4KB / 94ms  | 383.4KB / 179ms | 309.7KB / 253ms  | 297.2KB / ~200ms | ~420KB / ~100ms | **+4.2%**        |
+| review.jpg         | 2300×1342  | 405.9KB / 94ms  | 405.9KB / 181ms | 334.3KB / 251ms  | 317.9KB / ~200ms | ~450KB / ~100ms | **+5.2%**        |
+| web.jpg            | 3220×1812  | 664.3KB / 177ms | 664.3KB / 339ms | 547.1KB / 474ms  | 518.5KB / ~350ms | ~730KB / ~180ms | **+5.5%**        |
 
 ### JPEG Preset Summary
 
@@ -403,16 +406,16 @@ cargo build --release --no-default-features --features simd
 
 ### Performance Summary (Apple Silicon M-series)
 
-| Operation                   | pixo              | Competitor                  | Result                        |
-| --------------------------- | ----------------- | --------------------------- | ----------------------------- |
-| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | flate2: 1.0 ms, 6.0 KB      | **2× better compression**     |
-| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | libdeflate: 0.23 ms, 3.1 KB | libdeflate 5× faster          |
-| DEFLATE (random 1MB)        | 5.4 ms, 185 MiB/s | flate2: 14.9 ms, 67 MiB/s   | **pixo 2.75× faster**         |
-| PNG 512×512 (level 6)       | 2.4 ms, 7.6 KB    | lodepng: 1.8 ms, 7.5 KB     | Tie (lodepng slightly faster) |
-| PNG 512×512 (level 6)       | 2.4 ms, 7.6 KB    | image: 0.6 ms, 76.8 KB      | **10× smaller output**        |
-| PNG 512×512 Balanced        | 5.2 ms, 7.6 KB    | oxipng: 100 ms, 4.3 KB      | **19× faster**                |
-| JPEG 512×512 (Q85 baseline) | 1.6 ms, 17.3 KB   | jpeg-encoder: 0.9 ms        | jpeg-encoder 1.8× faster      |
-| JPEG 512×512 Max            | 9.1 ms, 10.5 KB   | mozjpeg: 10.0 ms, 8.2 KB    | Comparable speed              |
+| Operation                   | pixo              | Competitor                  | Result                      |
+| --------------------------- | ----------------- | --------------------------- | --------------------------- |
+| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | flate2: 1.0 ms, 6.0 KB      | **2× better compression**   |
+| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | libdeflate: 0.23 ms, 3.1 KB | libdeflate 5× faster        |
+| DEFLATE (random 1MB)        | 5.4 ms, 185 MiB/s | flate2: 14.9 ms, 67 MiB/s   | **pixo 2.75× faster**       |
+| PNG 512×512 (level 6)       | 1.8 ms, 7.6 KB    | lodepng: 1.8 ms, 7.5 KB     | Tie (identical performance) |
+| PNG 512×512 (level 6)       | 1.8 ms, 7.6 KB    | image: 0.6 ms, 76.8 KB      | **10× smaller output**      |
+| PNG 512×512 Balanced        | 4.6 ms, 10.1 KB   | oxipng: 112 ms, 4.3 KB      | **24× faster**              |
+| JPEG 512×512 (Q85 baseline) | 1.2 ms, 17.3 KB   | jpeg-encoder: 1.0 ms        | jpeg-encoder 1.2× faster    |
+| JPEG 512×512 Max            | 11.8 ms, 10.5 KB  | mozjpeg: 15.7 ms, 8.2 KB    | **pixo 1.3× faster**        |
 
 ### Decision Matrix by Primary Constraint
 
