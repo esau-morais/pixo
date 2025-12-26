@@ -610,7 +610,7 @@ compiled to WebAssembly via Emscripten.
 | Dimension            | pixo                      | Best Alternative         | Verdict                 |
 | -------------------- | ------------------------- | ------------------------ | ----------------------- |
 | Test code ratio      | 53.1% (10,895 LOC)        | miniz_oxide (42.3%)      | **Best in class**       |
-| Actual code coverage | 85.4% (4,326/5,065 lines) | -                        | **Excellent**           |
+| Actual code coverage | 85.4% (4,380/5,129 lines) | -                        | **Excellent**           |
 | Zero dependencies    | Yes                       | jpeg-encoder (JPEG only) | **Unique for PNG+JPEG** |
 | Codebase size        | 7,893 LOC                 | jpeg-encoder (2,846)     | Compact for scope       |
 | Compression quality  | 4-5% vs mozjpeg           | mozjpeg                  | Good tradeoff           |
@@ -685,14 +685,14 @@ Note: Test counts include doctests, property-based tests, and CLI unit tests.
 Measured with `cargo tarpaulin`:
 
 ```
-85.41% coverage, 4326/5065 lines covered
+85.40% coverage, 4380/5129 lines covered
 ```
 
 | Component            | Lines Covered | Total Lines | Coverage |
 | -------------------- | ------------- | ----------- | -------- |
 | DEFLATE (deflate.rs) | 730           | 910         | 80.2%    |
-| PNG (mod.rs)         | 730           | 835         | 87.4%    |
-| JPEG (mod.rs)        | 652           | 753         | 86.6%    |
+| PNG (mod.rs)         | 746           | 851         | 87.7%    |
+| JPEG (mod.rs)        | 657           | 758         | 86.7%    |
 | LZ77 (lz77.rs)       | 443           | 496         | 89.3%    |
 | Huffman (compress)   | 118           | 121         | 97.5%    |
 | JPEG Huffman         | 201           | 204         | 98.5%    |
@@ -700,8 +700,8 @@ Measured with `cargo tarpaulin`:
 | JPEG quantize        | 37            | 37          | 100.0%   |
 | JPEG trellis         | 121           | 122         | 99.2%    |
 | JPEG DCT             | 382           | 408         | 93.6%    |
-| PNG filters          | 160           | 261         | 61.3%    |
-| PNG bit_depth        | 58            | 59          | 98.3%    |
+| PNG filters          | 165           | 269         | 61.3%    |
+| PNG bit_depth        | 86            | 94          | 91.5%    |
 | PNG chunk            | 10            | 10          | 100.0%   |
 | CRC32                | 44            | 44          | 100.0%   |
 | Adler32              | 12            | 13          | 92.3%    |
