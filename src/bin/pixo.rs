@@ -26,7 +26,7 @@ EXAMPLES:
     pixo photo.png -o photo.jpg              Convert PNG to JPEG
     pixo photo.png -o photo.jpg -q 90        JPEG with higher quality
     pixo input.jpg -o output.png -c 9        Maximum PNG compression
-    pixo image.png --png-preset max          Use PNG optimization preset
+    pixo image.png --preset max               Maximum compression preset
     pixo photo.png -o gray.jpg --grayscale   Convert to grayscale
     pixo photo.png -v                        Verbose output with timing
 
@@ -59,20 +59,20 @@ struct Args {
     jpeg_restart_interval: u16,
 
     /// PNG compression level (1-9, higher = smaller file)
-    #[arg(short = 'c', long, default_value = "2", value_parser = clap::value_parser!(u8).range(1..=9))]
-    compression: u8,
+    #[arg(short = 'c', long, value_parser = clap::value_parser!(u8).range(1..=9))]
+    compression: Option<u8>,
 
     /// JPEG chroma subsampling
     #[arg(long, value_enum, default_value = "s444")]
     subsampling: SubsamplingArg,
 
     /// PNG filter strategy
-    #[arg(long, value_enum, default_value = "adaptive-fast")]
-    filter: FilterArg,
-
-    /// PNG preset (overrides compression/filter when set)
     #[arg(long, value_enum)]
-    png_preset: Option<PngPresetArg>,
+    filter: Option<FilterArg>,
+
+    /// Compression preset (applies to both PNG and JPEG)
+    #[arg(long, value_enum)]
+    preset: Option<PresetArg>,
 
     /// Optimize fully transparent pixels by zeroing color channels (PNG)
     #[arg(long, default_value_t = false)]
@@ -155,12 +155,12 @@ enum FilterArg {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
-enum PngPresetArg {
-    /// Fastest settings (level 2, AdaptiveFast, no optimizations)
+enum PresetArg {
+    /// Fast encoding (PNG: level 2, AdaptiveFast; JPEG: baseline)
     Fast,
-    /// Balanced settings (level 6, Adaptive, all optimizations)
+    /// Balanced (PNG: level 6, Adaptive; JPEG: optimized Huffman)
     Balanced,
-    /// Maximum compression (level 9, MinSum, all optimizations)
+    /// Maximum compression (PNG: level 9, MinSum; JPEG: progressive + trellis)
     Max,
 }
 
@@ -642,40 +642,45 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut output_data = Vec::new();
     match format {
         OutputFormat::Png => {
-            let mut builder = PngOptions::builder(width, height)
-                .color_type(color_type)
-                .compression_level(args.compression)
-                .filter_strategy(args.filter.to_strategy())
+            // Start with preset if specified, then apply explicit CLI overrides
+            let mut builder = PngOptions::builder(width, height).color_type(color_type);
+
+            if let Some(preset) = args.preset {
+                let preset_id = match preset {
+                    PresetArg::Fast => 0,
+                    PresetArg::Balanced => 1,
+                    PresetArg::Max => 2,
+                };
+                builder = builder.preset(preset_id);
+            }
+
+            // Explicit CLI arguments override preset values (only if specified)
+            if let Some(level) = args.compression {
+                builder = builder.compression_level(level);
+            } else if args.preset.is_none() {
+                // No preset and no explicit compression: use default level 2
+                builder = builder.compression_level(2);
+            }
+
+            if let Some(filter) = args.filter {
+                builder = builder.filter_strategy(filter.to_strategy());
+            } else if args.preset.is_none() {
+                // No preset and no explicit filter: use default AdaptiveFast
+                builder = builder.filter_strategy(FilterStrategy::AdaptiveFast);
+            }
+
+            let options = builder
                 .optimize_alpha(args.png_optimize_alpha)
                 .reduce_color_type(args.png_reduce_color)
                 .strip_metadata(args.png_strip_metadata)
                 .reduce_palette(args.png_reduce_color)
-                .verbose_filter_log(args.verbose);
-
-            if let Some(preset) = args.png_preset {
-                let preset_id = match preset {
-                    PngPresetArg::Fast => 0,
-                    PngPresetArg::Balanced => 1,
-                    PngPresetArg::Max => 2,
-                };
-                builder = builder.preset(preset_id);
-                // Explicit flags still override preset
-                builder = builder
-                    .compression_level(args.compression)
-                    .filter_strategy(args.filter.to_strategy())
-                    .optimize_alpha(args.png_optimize_alpha)
-                    .reduce_color_type(args.png_reduce_color)
-                    .strip_metadata(args.png_strip_metadata)
-                    .reduce_palette(args.png_reduce_color)
-                    .verbose_filter_log(args.verbose);
-            }
-
-            let options = builder.build();
+                .verbose_filter_log(args.verbose)
+                .build();
 
             if args.verbose {
                 eprintln!(
                     "PNG options: preset={:?}, level={}, filter={:?}, optimize_alpha={}, reduce_color_type={}, reduce_palette={}, strip_metadata={}",
-                    args.png_preset.unwrap_or(PngPresetArg::Fast),
+                    args.preset,
                     options.compression_level,
                     options.filter_strategy,
                     options.optimize_alpha,
@@ -688,26 +693,46 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             pixo::png::encode_into(&mut output_data, &pixels, &options)?
         }
         OutputFormat::Jpeg | OutputFormat::Jpg => {
+            // Start with preset if specified, otherwise use defaults
+            let preset_id = args.preset.map(|p| match p {
+                PresetArg::Fast => 0,
+                PresetArg::Balanced => 1,
+                PresetArg::Max => 2,
+            });
+
+            let base_options = if let Some(id) = preset_id {
+                JpegOptions::from_preset(width, height, args.quality, id)
+            } else {
+                JpegOptions::builder(width, height)
+                    .quality(args.quality)
+                    .build()
+            };
+
+            // Apply explicit CLI flags (override preset values)
             let options = JpegOptions::builder(width, height)
                 .color_type(color_type)
                 .quality(args.quality)
                 .subsampling(args.subsampling.into())
                 .restart_interval(if args.jpeg_restart_interval == 0 {
-                    None
+                    base_options.restart_interval
                 } else {
                     Some(args.jpeg_restart_interval)
                 })
-                .optimize_huffman(args.jpeg_optimize_huffman)
-                .progressive(false)
-                .trellis_quant(false)
+                .optimize_huffman(args.jpeg_optimize_huffman || base_options.optimize_huffman)
+                .progressive(base_options.progressive)
+                .trellis_quant(base_options.trellis_quant)
                 .build();
+
             if args.verbose {
                 eprintln!(
-                    "JPEG options: quality={}, subsampling={:?}, restart_interval={:?}, optimize_huffman={}",
+                    "JPEG options: preset={:?}, quality={}, subsampling={:?}, restart_interval={:?}, optimize_huffman={}, progressive={}, trellis={}",
+                    args.preset,
                     options.quality,
                     options.subsampling,
                     options.restart_interval,
-                    options.optimize_huffman
+                    options.optimize_huffman,
+                    options.progressive,
+                    options.trellis_quant
                 );
             }
             pixo::jpeg::encode_into(&mut output_data, &pixels, &options)?
@@ -792,22 +817,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         print_results(&json_output);
     } else if args.verbose {
         eprintln!("Output: {output_display}");
-        eprintln!("  Format: {format:?}");
-        eprintln!("  Color type: {color_type:?}");
-        match format {
-            OutputFormat::Png => {
-                let compression = args.compression;
-                let filter = &args.filter;
-                eprintln!("  Compression level: {compression}");
-                eprintln!("  Filter: {filter:?}");
-            }
-            OutputFormat::Jpeg | OutputFormat::Jpg => {
-                let quality = args.quality;
-                let subsampling = &args.subsampling;
-                eprintln!("  Quality: {quality}");
-                eprintln!("  Subsampling: {subsampling:?}");
-            }
-        }
         eprintln!("  Encode time: {encode_time:.2?}");
         eprintln!(
             "  Size: {} -> {} ({:.1}%)",

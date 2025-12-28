@@ -4,7 +4,8 @@
 
 use crate::bits::BitWriter64;
 use crate::compress::lz77::{
-    CostModel, Lz77Compressor, PackedToken, Token, MAX_DISTANCE, MAX_MATCH_LENGTH, MIN_MATCH_LENGTH,
+    CostModel, LongestMatchCache, Lz77Compressor, PackedToken, Token, MAX_DISTANCE,
+    MAX_MATCH_LENGTH, MIN_MATCH_LENGTH,
 };
 use crate::compress::{adler32::adler32, huffman};
 use std::sync::{LazyLock, Mutex};
@@ -306,12 +307,17 @@ pub fn deflate_optimal(data: &[u8], iterations: usize) -> Vec<u8> {
     // Track previous cost for convergence detection
     let mut prev_cost = f32::MAX;
 
+    // Create match cache for iterative refinement (Zopfli optimization)
+    // This avoids recomputing matches on each iteration since input data is unchanged
+    let mut match_cache = LongestMatchCache::new(data.len());
+
     for iter in 0..iterations {
         // Create cost model from current statistics
         let cost_model = CostModel::from_statistics(&lit_len_counts, &dist_counts);
 
-        // Re-parse with optimal LZ77 using the cost model
-        let tokens = lz77.compress_optimal(data, &cost_model);
+        // Re-parse with optimal LZ77 using the cost model and cache
+        // First iteration populates cache, subsequent iterations reuse it
+        let tokens = lz77.compress_optimal_cached(data, &cost_model, &mut match_cache);
 
         // Encode and check size
         let output = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
@@ -767,10 +773,13 @@ pub fn deflate_optimal_split(data: &[u8], iterations: usize, max_blocks: usize) 
     let mut best_tokens = initial_tokens;
     let mut prev_cost = f32::MAX;
 
+    // Create match cache for iterative refinement (Zopfli optimization)
+    let mut match_cache = LongestMatchCache::new(data.len());
+
     // Iterative refinement
     for iter in 0..iterations {
         let cost_model = CostModel::from_statistics(&lit_len_counts, &dist_counts);
-        let tokens = lz77.compress_optimal(data, &cost_model);
+        let tokens = lz77.compress_optimal_cached(data, &cost_model, &mut match_cache);
 
         // Update statistics
         let (new_lit_counts, new_dist_counts) = count_symbols(&tokens);
