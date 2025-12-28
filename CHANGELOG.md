@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2025-12-28
+
+### Changed
+
+- **PNG compression ~55% faster** — New Bigrams filter strategy for `FilterStrategy::All` significantly improves Max preset performance
+- **Improved LZ77 compression** — Enhanced match selection logic for better compression ratios
+- **Test coverage increased to 86%** — Expanded test suite for better reliability
+
 ## [0.4.0] - 2025-12-27
 
 ### Changed
