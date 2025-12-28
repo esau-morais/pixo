@@ -176,7 +176,7 @@ impl PngOptions {
             height,
             color_type: ColorType::Rgba,
             compression_level: 9,
-            filter_strategy: FilterStrategy::MinSum,
+            filter_strategy: FilterStrategy::Bigrams,
             optimize_alpha: true,
             reduce_color_type: true,
             strip_metadata: true,
@@ -355,6 +355,8 @@ pub enum FilterStrategy {
     Adaptive,
     /// Adaptive but with early cut and limited trials (faster).
     AdaptiveFast,
+    /// Choose filter per row minimizing distinct bigrams (best DEFLATE correlation).
+    Bigrams,
 }
 
 /// Encode raw pixel data as PNG.
@@ -1842,9 +1844,10 @@ pub fn encode_indexed_into(
     // Palette-aware filtering: prefer None/Sub for indexed data
     let mut palette_options = options.clone();
     palette_options.filter_strategy = match options.filter_strategy {
-        FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast | FilterStrategy::MinSum => {
-            FilterStrategy::None
-        }
+        FilterStrategy::Adaptive
+        | FilterStrategy::AdaptiveFast
+        | FilterStrategy::MinSum
+        | FilterStrategy::Bigrams => FilterStrategy::None,
         other => other,
     };
 
@@ -2185,7 +2188,7 @@ mod tests {
         // Test Max preset
         let max = PngOptions::max(100, 100);
         assert_eq!(max.compression_level, 9);
-        assert_eq!(max.filter_strategy, FilterStrategy::MinSum);
+        assert_eq!(max.filter_strategy, FilterStrategy::Bigrams);
         assert!(max.optimize_alpha);
         assert!(max.reduce_color_type);
         assert!(max.reduce_palette);

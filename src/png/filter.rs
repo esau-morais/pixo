@@ -79,7 +79,7 @@ pub fn apply_filters_with_row_bytes(
     if area <= 4096
         && matches!(
             strategy,
-            FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast
+            FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast | FilterStrategy::Bigrams
         )
     {
         strategy = FilterStrategy::Sub;
@@ -97,7 +97,7 @@ pub fn apply_filters_with_row_bytes(
         if height > 32
             && matches!(
                 strategy,
-                FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast
+                FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast | FilterStrategy::Bigrams
             )
         {
             return apply_filters_parallel(
@@ -403,6 +403,73 @@ fn minsum_filter(
     adaptive_filter(row, prev_row, bpp, output, scratch);
 }
 
+/// Bigrams filter selection: try all filters and pick the one with fewest distinct bigrams.
+///
+/// This correlates better with DEFLATE compression than min-sum because DEFLATE's
+/// LZ77 algorithm benefits from repeated byte sequences (fewer distinct bigrams).
+fn bigrams_filter(
+    row: &[u8],
+    prev_row: &[u8],
+    bpp: usize,
+    output: &mut Vec<u8>,
+    scratch: &mut AdaptiveScratch,
+) {
+    scratch.clear();
+
+    let mut best_filter = FILTER_NONE;
+    let mut best_score = usize::MAX;
+
+    // Try None filter first
+    scratch.none.extend_from_slice(row);
+    let score = score_bigrams(&scratch.none);
+    if score < best_score {
+        best_score = score;
+        best_filter = FILTER_NONE;
+    }
+
+    // Try Sub filter
+    filter_sub(row, bpp, &mut scratch.sub);
+    let score = score_bigrams(&scratch.sub);
+    if score < best_score {
+        best_score = score;
+        best_filter = FILTER_SUB;
+    }
+
+    // Try Up filter
+    filter_up(row, prev_row, &mut scratch.up);
+    let score = score_bigrams(&scratch.up);
+    if score < best_score {
+        best_score = score;
+        best_filter = FILTER_UP;
+    }
+
+    // Try Average filter
+    filter_average(row, prev_row, bpp, &mut scratch.avg);
+    let score = score_bigrams(&scratch.avg);
+    if score < best_score {
+        best_score = score;
+        best_filter = FILTER_AVERAGE;
+    }
+
+    // Try Paeth filter
+    filter_paeth(row, prev_row, bpp, &mut scratch.paeth);
+    let score = score_bigrams(&scratch.paeth);
+    if score < best_score {
+        best_filter = FILTER_PAETH;
+    }
+
+    // Output the best filter result
+    output.push(best_filter);
+    match best_filter {
+        FILTER_NONE => output.extend_from_slice(&scratch.none),
+        FILTER_SUB => output.extend_from_slice(&scratch.sub),
+        FILTER_UP => output.extend_from_slice(&scratch.up),
+        FILTER_AVERAGE => output.extend_from_slice(&scratch.avg),
+        FILTER_PAETH => output.extend_from_slice(&scratch.paeth),
+        _ => unreachable!(),
+    }
+}
+
 /// Adaptive filtering with a faster heuristic and early cutoffs.
 fn adaptive_filter_fast(
     row: &[u8],
@@ -497,6 +564,9 @@ fn filter_row(
         FilterStrategy::AdaptiveFast => {
             adaptive_filter_fast(row, prev_row, bpp, output, scratch);
         }
+        FilterStrategy::Bigrams => {
+            bigrams_filter(row, prev_row, bpp, output, scratch);
+        }
     }
 }
 
@@ -554,6 +624,28 @@ fn score_filter(filtered: &[u8]) -> u64 {
             .map(|&b| (b as i8).unsigned_abs() as u64)
             .sum()
     }
+}
+
+/// Score a filtered row by counting distinct byte pairs (bigrams).
+///
+/// Lower scores (fewer distinct bigrams) correlate better with DEFLATE
+/// compression than sum-of-absolute-values, as DEFLATE's LZ77 benefits
+/// from repeated byte sequences.
+#[inline]
+fn score_bigrams(filtered: &[u8]) -> usize {
+    let mut seen = [false; 65536];
+    filtered
+        .windows(2)
+        .filter(|w| {
+            let key = (w[0] as usize) << 8 | w[1] as usize;
+            if seen[key] {
+                false
+            } else {
+                seen[key] = true;
+                true
+            }
+        })
+        .count()
 }
 
 /// Simple high-entropy detector:
@@ -749,6 +841,48 @@ mod tests {
     }
 
     #[test]
+    fn test_score_bigrams_all_same() {
+        // All same bytes = only 1 distinct bigram
+        let data = vec![42u8; 100];
+        let score = score_bigrams(&data);
+        assert_eq!(score, 1); // (42, 42) is the only bigram
+    }
+
+    #[test]
+    fn test_score_bigrams_all_unique() {
+        // Sequential bytes = many distinct bigrams
+        let data: Vec<u8> = (0..10).collect();
+        let score = score_bigrams(&data);
+        // Bigrams: (0,1), (1,2), (2,3), ..., (8,9) = 9 distinct bigrams
+        assert_eq!(score, 9);
+    }
+
+    #[test]
+    fn test_score_bigrams_repeating_pattern() {
+        // Repeating pattern should have fewer distinct bigrams
+        let data = vec![1, 2, 1, 2, 1, 2, 1, 2];
+        let score = score_bigrams(&data);
+        // Bigrams: (1,2), (2,1) = 2 distinct bigrams
+        assert_eq!(score, 2);
+    }
+
+    #[test]
+    fn test_score_bigrams_single_byte() {
+        // Single byte = no bigrams
+        let data = vec![42u8];
+        let score = score_bigrams(&data);
+        assert_eq!(score, 0);
+    }
+
+    #[test]
+    fn test_score_bigrams_empty() {
+        // Empty = no bigrams
+        let data: Vec<u8> = vec![];
+        let score = score_bigrams(&data);
+        assert_eq!(score, 0);
+    }
+
+    #[test]
     fn test_is_high_entropy_row_short() {
         // Short rows should not be considered high entropy
         let row = vec![0u8; 100];
@@ -910,6 +1044,35 @@ mod tests {
 
         // Should produce valid output
         assert_eq!(filtered.len(), 1 + 100); // 1 row: 1 filter byte + 100 data bytes
+    }
+
+    #[test]
+    fn test_apply_filters_bigrams_strategy() {
+        // Use a larger image to avoid small-image optimization (area > 4096)
+        let width = 100;
+        let height = 50;
+        let bytes_per_pixel = 3;
+        let row_bytes = width * bytes_per_pixel;
+        let data: Vec<u8> = (0..(width * height * bytes_per_pixel))
+            .map(|i| (i % 256) as u8)
+            .collect();
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::Bigrams,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(
+            &data,
+            width as u32,
+            height as u32,
+            bytes_per_pixel,
+            &options,
+        );
+
+        // Should produce valid output (height rows, each with filter byte + row_bytes)
+        assert_eq!(filtered.len(), height * (1 + row_bytes));
+        // Filter bytes should be valid filter types
+        assert!(filtered[0] <= 4); // FILTER_NONE through FILTER_PAETH
     }
 
     #[test]

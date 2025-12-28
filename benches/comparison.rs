@@ -1352,7 +1352,8 @@ fn print_summary_report() {
     let gradient = generate_gradient_image(512, 512);
 
     // pixo Fast
-    let fast_opts = png::PngOptions::fast(512, 512);
+    let mut fast_opts = png::PngOptions::fast(512, 512);
+    fast_opts.color_type = ColorType::Rgb;
     let (fast_size, fast_time) = measure_png_encode(&gradient, &fast_opts);
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
@@ -1363,7 +1364,8 @@ fn print_summary_report() {
     );
 
     // pixo Balanced
-    let balanced_opts = png::PngOptions::balanced(512, 512);
+    let mut balanced_opts = png::PngOptions::balanced(512, 512);
+    balanced_opts.color_type = ColorType::Rgb;
     let (balanced_size, balanced_time) = measure_png_encode(&gradient, &balanced_opts);
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",

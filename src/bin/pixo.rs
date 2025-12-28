@@ -59,16 +59,16 @@ struct Args {
     jpeg_restart_interval: u16,
 
     /// PNG compression level (1-9, higher = smaller file)
-    #[arg(short = 'c', long, default_value = "2", value_parser = clap::value_parser!(u8).range(1..=9))]
-    compression: u8,
+    #[arg(short = 'c', long, value_parser = clap::value_parser!(u8).range(1..=9))]
+    compression: Option<u8>,
 
     /// JPEG chroma subsampling
     #[arg(long, value_enum, default_value = "s444")]
     subsampling: SubsamplingArg,
 
     /// PNG filter strategy
-    #[arg(long, value_enum, default_value = "adaptive-fast")]
-    filter: FilterArg,
+    #[arg(long, value_enum)]
+    filter: Option<FilterArg>,
 
     /// Compression preset (applies to both PNG and JPEG)
     #[arg(long, value_enum)]
@@ -642,35 +642,40 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut output_data = Vec::new();
     match format {
         OutputFormat::Png => {
-            // Start with preset if specified, otherwise use CLI defaults
-            let options = if let Some(preset) = args.preset {
+            // Start with preset if specified, then apply explicit CLI overrides
+            let mut builder = PngOptions::builder(width, height).color_type(color_type);
+
+            if let Some(preset) = args.preset {
                 let preset_id = match preset {
                     PresetArg::Fast => 0,
                     PresetArg::Balanced => 1,
                     PresetArg::Max => 2,
                 };
-                PngOptions::builder(width, height)
-                    .color_type(color_type)
-                    .preset(preset_id)
-                    // Apply explicit boolean flags (these are off by default, so if true, user set them)
-                    .optimize_alpha(args.png_optimize_alpha)
-                    .reduce_color_type(args.png_reduce_color)
-                    .strip_metadata(args.png_strip_metadata)
-                    .reduce_palette(args.png_reduce_color)
-                    .verbose_filter_log(args.verbose)
-                    .build()
-            } else {
-                PngOptions::builder(width, height)
-                    .color_type(color_type)
-                    .compression_level(args.compression)
-                    .filter_strategy(args.filter.to_strategy())
-                    .optimize_alpha(args.png_optimize_alpha)
-                    .reduce_color_type(args.png_reduce_color)
-                    .strip_metadata(args.png_strip_metadata)
-                    .reduce_palette(args.png_reduce_color)
-                    .verbose_filter_log(args.verbose)
-                    .build()
-            };
+                builder = builder.preset(preset_id);
+            }
+
+            // Explicit CLI arguments override preset values (only if specified)
+            if let Some(level) = args.compression {
+                builder = builder.compression_level(level);
+            } else if args.preset.is_none() {
+                // No preset and no explicit compression: use default level 2
+                builder = builder.compression_level(2);
+            }
+
+            if let Some(filter) = args.filter {
+                builder = builder.filter_strategy(filter.to_strategy());
+            } else if args.preset.is_none() {
+                // No preset and no explicit filter: use default AdaptiveFast
+                builder = builder.filter_strategy(FilterStrategy::AdaptiveFast);
+            }
+
+            let options = builder
+                .optimize_alpha(args.png_optimize_alpha)
+                .reduce_color_type(args.png_reduce_color)
+                .strip_metadata(args.png_strip_metadata)
+                .reduce_palette(args.png_reduce_color)
+                .verbose_filter_log(args.verbose)
+                .build();
 
             if args.verbose {
                 eprintln!(
